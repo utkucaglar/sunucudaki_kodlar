@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "GURBET GÖKGÖZ BİLEN",
+    "info": "ÖĞRETİM GÖREVLİSİ (DERS VERMEKLE GÖREVLİ)\nGURBET GÖKGÖZ BİLEN\nDOKUZ EYLÜL ÜNİVERSİTESİ/REKTÖRLÜK/\nSosyal-Beşeri ve İdari Bilimler Temel Alanı Atatürk İlkeleri ve Cumhuriyet Tarihi gurbet.gokgoz[at]deu.edu.tr",
+    "photo": "collab_1_GURBET_GÖKGÖZ_BİLEN.jpg",
+    "status": "completed",
+    "deleted": false,
+    "url": "https://akademik.yok.gov.tr/AkademikArama/AkademisyenGorevOgrenimBilgileri?islem=direct&authorId=DE3A1004B18935FE"
+  },
+  {
+    "id": 2,
+    "name": "İSA ÖZAYDIN",
+    "info": "PROFESÖR\nİSA ÖZAYDIN\nKAFKAS ÜNİVERSİTESİ/VETERİNER FAKÜLTESİ/KLİNİK BİLİMLER BÖLÜMÜ/VETERİNERLİK CERRAHİSİ ANABİLİM DALI/\nSağlık Bilimleri Temel Alanı Veteriner Cerrahisi iozaydin[at]kafkas.edu.tr",
+    "photo": "collab_2_İSA_ÖZAYDIN.jpg",
+    "status": "completed",
+    "deleted": false,
+    "url": "https://akademik.yok.gov.tr/AkademikArama/AkademisyenGorevOgrenimBilgileri?islem=direct&authorId=4CF0FA2873145E96"
+  }
+]
