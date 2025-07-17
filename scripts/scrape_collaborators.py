@@ -22,6 +22,22 @@ def save_base64_image(data_url: str, filename: str):
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[^A-Za-z0-9ĞÜŞİÖÇğüşiöç ]+', '_', name).strip().replace(" ", "_")
 
+# --- YÖK AKADEMİK KUTUCUK AYRIŞTIRICI (main_profile ile aynı) ---
+def parse_labels_and_keywords(line):
+    parts = [p.strip() for p in line.split(';')]
+    left = parts[0] if parts else ''
+    rest_keywords = [p.strip() for p in parts[1:] if p.strip()]
+    left_parts = re.split(r'\s{2,}|\t+', left)
+    green_label = left_parts[0].strip() if len(left_parts) > 0 else ''
+    blue_label = left_parts[1].strip() if len(left_parts) > 1 else ''
+    keywords = []
+    if len(left_parts) > 2:
+        keywords += [p.strip() for p in left_parts[2:] if p.strip()]
+    keywords += rest_keywords
+    if not keywords:
+        keywords = ['-']
+    return green_label, blue_label, keywords
+
 if len(sys.argv) < 3:
     print("Kullanım: python scrape_collaborators.py <isim> <sessionId> [profil_url]")
     sys.exit(1)
@@ -114,6 +130,11 @@ return results;
         dest_path = os.path.join(PROFILE_PICS_DIR, dest_file)
         info = ""
         deleted = False
+        title = ''
+        header = ''
+        green_label = ''
+        blue_label = ''
+        keywords_str = ''
         if not href:
             # Profil linki yok, varsayılan fotoğrafla atlanıyor.
             try:
@@ -134,6 +155,47 @@ return results;
                 deleted = True
             else:
                 info = tds[0].text
+                info_lines = info.splitlines()
+                if len(info_lines) > 1:
+                    title = info_lines[0].strip()
+                    name = info_lines[1].strip()
+                else:
+                    title = isim
+                    name = isim
+                header = info_lines[2].strip() if len(info_lines) > 2 else ''
+                # Label ve keywordleri ayıkla (HTML span class ile)
+                green_label = ''
+                blue_label = ''
+                keywords_str = ''
+                try:
+                    green_span = tds[0].find_element(By.CSS_SELECTOR, 'span.label-success')
+                    green_label = green_span.text.strip()
+                except Exception:
+                    pass
+                try:
+                    blue_span = tds[0].find_element(By.CSS_SELECTOR, 'span.label-primary')
+                    blue_label = blue_span.text.strip()
+                    # keywords: blue_label'dan hemen sonraki düz metni td'nin innerHTML'inden ayıkla
+                    td_html = tds[0].get_attribute('innerHTML')
+                    import re
+                    # Blue label'dan hemen sonra gelen düz metni bul
+                    if isinstance(td_html, str):
+                        m = re.search(r'<span[^>]*label-primary[^>]*>.*?</span>([^<]*)', td_html)
+                        if m:
+                            kw = m.group(1).strip()
+                            if kw:
+                                keywords_str = kw
+                except Exception:
+                    pass
+                # info alanı sadece header olacak (header alanı kaldırıldı)
+                info = info_lines[2].strip() if len(info_lines) > 2 else ''
+                # --- EMAIL SCRAPING ---
+                email = ''
+                try:
+                    email_link = tds[0].find_element(By.CSS_SELECTOR, "a[href^='mailto']")
+                    email = email_link.text.strip().replace('[at]', '@')
+                except Exception:
+                    email = ''
                 try:
                     img = driver.find_element(By.CSS_SELECTOR, "img.img-circle")
                     src = img.get_attribute("src")
@@ -152,11 +214,16 @@ return results;
         collaborators.append({
             "id": idx,
             "name": isim,
+            "title": title,
             "info": info,
+            "green_label": green_label,
+            "blue_label": blue_label,
+            "keywords": keywords_str,
             "photo": dest_file,
             "status": "completed",
             "deleted": deleted,
-            "url": href if not deleted else ""
+            "url": href if not deleted else "",
+            "email": email
         })
         # Her işbirlikçi sonrası JSON'u güncelle
         with open(collaborators_json_path, "w", encoding="utf-8") as f:
