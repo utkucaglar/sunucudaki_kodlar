@@ -31,6 +31,7 @@ interface SearchResultsProps {
       blue_label?: string
       keywords?: string
       email?: string // eklendi
+      deleted?: boolean // eklendi
     }>
     directCollaborators?: boolean // eklendi
   }
@@ -177,6 +178,10 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
       while (!stopped) {
         try {
           const res = await fetch(`/collaborator-sessions/${results.sessionId}/main_profile.json?${Date.now()}`);
+          let done = false;
+          // Alan/uzmanlık aramasında main_done.txt dosyasını kontrol et
+          const doneRes = await fetch(`/collaborator-sessions/${results.sessionId}/main_done.txt?${Date.now()}`);
+          if (doneRes.ok) done = true;
           if (res.ok) {
             const data = await res.json();
             if (Array.isArray(data)) {
@@ -184,12 +189,13 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
                 if (data.length > prev.length) return data;
                 return prev;
               });
-              // Eğer polling sırasında yeni profil gelmiyorsa ve 2 kez üst üste aynıysa polling'i durdur
-              if (data.length >= profiles.length && data.length % profilesPerPage !== 0) {
-                setAllProfilesLoaded(true);
-                break;
-              }
             }
+          }
+          if (done) {
+            // 1.5 saniye bekle, sonra polling'i bitir
+            await new Promise(r => setTimeout(r, 1500));
+            setAllProfilesLoaded(true);
+            break;
           }
         } catch {}
         await new Promise(r => setTimeout(r, 1500));
@@ -237,10 +243,7 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
   // Paging hesaplamaları
   const totalProfiles = profiles.length;
   const totalPages = Math.ceil(totalProfiles / profilesPerPage);
-  const pagedProfiles = profiles.slice(
-    (currentPage - 1) * profilesPerPage,
-    currentPage * profilesPerPage
-  );
+  const pagedProfiles = profiles.slice((currentPage - 1) * profilesPerPage, currentPage * profilesPerPage);
 
   // Sayfa değişiminde en üste scroll
   useEffect(() => {
@@ -354,8 +357,40 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
             <ThemeToggle />
           </div>
           <Card className="w-full border-2 border-border bg-card dark:bg-card shadow-xl p-8">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between relative">
               <CardTitle className="text-2xl font-bold text-primary mb-4">Birden fazla profil bulundu, lütfen seçin:</CardTitle>
+              {/* Modern loading indicator and found count */}
+              {!allProfilesLoaded ? (
+                <div className="absolute right-0 top-0 flex flex-col items-end z-10">
+                  <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-900/70 px-5 py-3 rounded-xl shadow-lg border border-blue-200 dark:border-blue-700 mb-2 animate-fade-in-up">
+                    <span className="relative flex h-8 w-8">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-60"></span>
+                      <span className="relative inline-flex rounded-full h-8 w-8 bg-blue-600">
+                        <Loader2 className="w-6 h-6 m-auto text-white animate-spin" />
+                      </span>
+                    </span>
+                    <div className="flex flex-col items-start">
+                      <span className="font-semibold text-blue-800 dark:text-blue-200 text-base">Profiller yükleniyor...</span>
+                      <span className="text-blue-700 dark:text-blue-300 text-sm">Şu ana kadar <b>{profiles.length}</b> profil bulundu</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="absolute right-0 top-0 flex flex-col items-end z-10">
+                  <div className="flex items-center gap-3 bg-green-50 dark:bg-green-900/70 px-5 py-3 rounded-xl shadow-lg border border-green-200 dark:border-green-700 mb-2 animate-fade-in-up">
+                    <span className="relative flex h-8 w-8">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60"></span>
+                      <span className="relative inline-flex rounded-full h-8 w-8 bg-green-600">
+                        <svg className="w-6 h-6 m-auto text-white" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      </span>
+                    </span>
+                    <div className="flex flex-col items-start">
+                      <span className="font-semibold text-green-800 dark:text-green-200 text-base">Tüm profiller yüklendi!</span>
+                      <span className="text-green-700 dark:text-green-300 text-sm">Toplam <b>{profiles.length}</b> profil bulundu</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {/* Paging üstte */}
@@ -428,7 +463,7 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
                     <div className="flex flex-row items-center mb-3">
                       <div className="w-14 h-14 md:w-16 md:h-16 rounded-full border-2 border-gray-400 bg-white overflow-hidden flex-shrink-0 flex items-center justify-center">
                         {profile.photoUrl ? (
-                          <img src={profile.photoUrl} alt={profile.name + ' profil fotoğrafı'} className="w-full h-full object-cover rounded-full" />
+                          <img src={profile.photoUrl} alt={profile.name + ' profil fotoğrafı'} className="w-full h-full object-cover rounded-full" onError={(e) => { e.currentTarget.src = '/collaborator-sessions/default_photo.jpg'; }} />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-2xl text-gray-400">?</div>
                         )}
@@ -437,7 +472,7 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
                         <span className="text-emerald-700 dark:text-emerald-400 text-base font-bold mb-0.5 text-left">{profile.title}</span>
                         <span className="text-xl font-bold text-primary text-left">{profile.name}</span>
                         <span className="text-sm text-gray-700 dark:text-gray-200 font-semibold text-left mt-1">{extractUniversity(profile.info)}</span>
-                        {profile.email && (
+                        {profile.email && !profile.deleted && (
                           <span className="text-sm text-blue-600 italic mt-1 flex items-center gap-1">
                             <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25H4.5a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5H4.5a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-.659 1.591l-7.5 7.5a2.25 2.25 0 01-3.182 0l-7.5-7.5A2.25 2.25 0 012.25 6.993V6.75" /></svg>
                             {profile.email}
@@ -615,26 +650,22 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
           <CardHeader>
             <CardTitle className="flex items-center gap-6 justify-between">
               <div className="flex items-center gap-6">
+                {/* Main Profile photo rendering (CardHeader) */}
                 <div className="relative w-32 h-32 rounded-full overflow-hidden border-4 border-primary shadow-lg ring-2 ring-primary">
-                  {photoReady ? (
-                    <Image
-                      src={`/collaborator-sessions/${results.sessionId}/profile_pictures/profile_main.jpg?t=${Date.now()}`}
+                  {mainProfile.photoUrl ? (
+                    <img
+                      src={mainProfile.photoUrl}
                       alt={`${mainProfile.name} profil fotoğrafı`}
-                      fill
-                      className="object-cover"
-                      key={results.sessionId}
+                      className="object-cover w-full h-full"
+                      onError={(e) => { e.currentTarget.src = '/collaborator-sessions/default_photo.jpg'; }}
                     />
-                  ) : photoError ? (
-                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500 text-center text-xs p-2">Profil fotoğrafı yüklenemedi</div>
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gray-100 animate-pulse">
-                      <span className="text-2xl text-gray-400">?</span>
-                    </div>
+                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-500 text-center text-xs p-2">Profil fotoğrafı yüklenemedi</div>
                   )}
                 </div>
                 {/* Move title above name */}
                 <div>
-                  <p className="text-emerald-700 dark:text-emerald-400 text-lg font-medium mb-0.5 text-left">{mainProfile.title}</p>
+                  <p className="text-emerald-700 dark:text-emerald-400 text-lg font-bold mb-0.5 text-left">{mainProfile.title}</p>
                   <h2 className="text-4xl font-bold text-primary text-left">
                     {mainProfile.name}
                   </h2>
@@ -745,7 +776,7 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
               </div>
             ) : (
               <div className={`grid w-full ${view === 'list' ? 'grid-cols-1 gap-6' : 'grid-cols-2 gap-6 px-8'}`}>
-                {collaborators.map((collaborator) => (
+                {collaborators.length > 0 ? collaborators.map((collaborator) => (
                   <div
                     key={collaborator.id}
                     className={`w-full flex flex-col p-6 border-2 border-border bg-card dark:bg-card rounded-2xl shadow-xl hover:shadow-2xl transition-all ${view === 'grid2' ? '' : 'max-w-2xl mx-auto mb-6'}`}
@@ -774,7 +805,7 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
                           <span className="text-emerald-700 dark:text-emerald-400 text-sm font-medium mb-0.5 text-left">{collaborator.title}</span>
                           <span className="text-xl font-bold text-primary text-left">{collaborator.name}</span>
                           <span className="text-sm text-gray-700 dark:text-gray-200 font-semibold text-left mt-1">{extractUniversity(collaborator.info)}</span>
-                          {collaborator.email && (
+                          {collaborator.email && !collaborator.deleted && (
                             <span className="text-xs text-blue-600 italic mt-1 flex items-center gap-1">
                               <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm0 0l8 8 8-8" /></svg>
                               {collaborator.email}
@@ -813,7 +844,9 @@ export default function SearchResults({ results, onNewSearch }: SearchResultsPro
                       )}
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="text-center text-gray-500">İşbirlikçi bulunamadı.</div>
+                )}
               </div>
             )}
           </CardContent>

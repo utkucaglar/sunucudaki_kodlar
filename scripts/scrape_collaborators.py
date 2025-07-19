@@ -228,11 +228,18 @@ return results;
         # Her işbirlikçi sonrası JSON'u güncelle
         with open(collaborators_json_path, "w", encoding="utf-8") as f:
             json.dump(collaborators, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         time.sleep(0.5)  # Progressive loading için kısa bekleme
     # --- DONE dosyasını sadece işbirlikçi varsa ve scraping bittiyse oluştur ---
     if collaborators:
+        # Dosya sistemini tamamen senkronize et (Linux/Unix)
+        if hasattr(os, "sync"):
+            os.sync()
         done_path = os.path.join(SESSION_DIR, "collaborators_done.txt")
         with open(done_path, "w") as f:
             f.write("done")
+            f.flush()
+            os.fsync(f.fileno())
 finally:
     driver.quit() 

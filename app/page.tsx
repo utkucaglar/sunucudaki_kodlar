@@ -11,7 +11,10 @@ import { AlertCircle } from "lucide-react"
 import SearchResults from "./components/search-results"
 import ThemeToggle from "@/components/ThemeToggle"
 import { Switch } from "@/components/ui/switch"
-import { SlidersHorizontal, Search } from "lucide-react"
+import { SlidersHorizontal, Search, X, Loader2 } from "lucide-react"
+import CustomFieldDropdown from "@/components/CustomFieldDropdown"
+import fieldsDataRaw from "../public/fields.json"
+import { Checkbox } from "@/components/ui/checkbox"
 
 export default function HomePage() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -24,11 +27,24 @@ export default function HomePage() {
   const [searchError, setSearchError] = useState<string | null>(null)
   const countdownRef = useRef<NodeJS.Timeout | null>(null)
   // error state kaldırıldı
+  const [selectedField, setSelectedField] = useState("");
+  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+  const [isFieldDropdownOpen, setIsFieldDropdownOpen] = useState(false);
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [specialtySearch, setSpecialtySearch] = useState("");
 
   // Validasyonlar
   const isBasicValid = searchTerm.trim().length >= 3;
   // Gelişmişte: isim zorunlu, email veya alan zorunlu, ikisi aynı anda olamaz
-  const isAdvancedValid = searchTerm.trim().length >= 3 && ((searchEmail.trim().length > 0 && searchField.trim().length === 0) || (searchField.trim().length > 0 && searchEmail.trim().length === 0));
+  const isAdvancedValid = searchTerm.trim().length >= 3 && (
+    (searchEmail.trim().length > 0 && searchField.trim().length === 0 && selectedField === "" && selectedSpecialties.length === 0) ||
+    (searchEmail.trim().length === 0 && selectedField && selectedSpecialties.length > 0)
+  );
+
+  // Alanlar ve uzmanlıklar
+  const fieldOptions = Object.keys(fieldsDataRaw).filter(f => f.toLowerCase().includes(fieldSearch.toLowerCase()));
+  const fieldsData = fieldsDataRaw as Record<string, string[]>;
+  const specialtyOptions = selectedField ? (fieldsData as Record<string, string[]>)[selectedField] : [];
 
   useEffect(() => {
     // Arama iptal olursa geri sayımı temizle
@@ -60,12 +76,17 @@ export default function HomePage() {
     setIsSearching(true)
     setSearchResults(null)
     try {
+      const body: any = { name: searchTerm, email: searchEmail };
+      if (searchMode === 'advanced' && selectedField && selectedSpecialties.length > 0 && !searchEmail.trim()) {
+        body.field = selectedField;
+        body.specialties = selectedSpecialties;
+      }
       const response = await fetch("/api/search", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name: searchTerm, email: searchEmail, field: searchField }),
+        body: JSON.stringify(body),
       })
       if (response.ok) {
         const data = await response.json()
@@ -89,7 +110,8 @@ export default function HomePage() {
     setSearchResults(null)
     setSearchTerm("")
     setSearchEmail("")
-    setSearchField("")
+    setSelectedField("") // sadece burada resetle
+    setSelectedSpecialties([])
     setCountdown(null)
     setSearchError(null)
   }
@@ -99,11 +121,11 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center p-4 bg-background relative">
+    <div className="min-h-[70vh] flex flex-col items-center justify-center p-4 bg-background relative">
       <div className="absolute top-4 right-4 z-50">
         <ThemeToggle />
       </div>
-      <Card className="w-full max-w-lg shadow-2xl border-0 bg-card dark:bg-card backdrop-blur-lg">
+      <Card className="w-full max-w-3xl shadow-2xl border-0 bg-card dark:bg-card backdrop-blur-lg">
         <CardHeader className="text-center space-y-2">
           <CardTitle className="text-3xl font-extrabold text-primary flex items-center justify-center gap-2">
             <Search className="w-7 h-7 text-secondary animate-pulse" />
@@ -153,26 +175,33 @@ export default function HomePage() {
                     id="email"
                     type="email"
                     value={searchEmail}
-                    onChange={(e) => setSearchEmail(e.target.value)}
+                    onChange={e => {
+                      setSearchEmail(e.target.value);
+                      if (e.target.value && selectedField) {
+                        setSelectedField("");
+                        setSelectedSpecialties([]);
+                      }
+                    }}
                     placeholder="E-posta adresi girin..."
-                    disabled={isSearching || searchField.trim().length > 0}
+                    disabled={isSearching || Boolean(selectedField) || Boolean(selectedSpecialties.length > 0)}
                     className="h-12 text-lg px-4 border-2 border-primary focus:border-secondary transition-all shadow-sm bg-background text-foreground"
-                    required={searchMode === 'advanced' && searchField.trim().length === 0}
+                    required={searchMode === 'advanced' && !selectedField && selectedSpecialties.length === 0}
                   />
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="field" className="text-sm font-semibold text-foreground">
                     Alan / Uzmanlık: <span className="text-xs text-muted-foreground ml-1">(zorunlu, e-posta ile birlikte kullanılamaz)</span>
                   </label>
-                  <Input
-                    id="field"
-                    type="text"
-                    value={searchField}
-                    onChange={(e) => setSearchField(e.target.value)}
-                    placeholder="Alan veya anahtar kelime girin..."
-                    disabled={isSearching || searchEmail.trim().length > 0}
-                    className="h-12 text-lg px-4 border-2 border-primary focus:border-secondary transition-all shadow-sm bg-background text-foreground"
-                    required={searchMode === 'advanced' && searchEmail.trim().length === 0}
+                  <CustomFieldDropdown
+                    options={fieldOptions}
+                    value={selectedField}
+                    onChange={val => {
+                      setSelectedField(val);
+                      setSelectedSpecialties([]);
+                      setSearchEmail(""); // Alan seçilince e-posta sıfırlansın
+                    }}
+                    placeholder="Alan seçin..."
+                    disabled={isSearching || Boolean(searchEmail.trim().length > 0)}
                   />
                 </div>
               </div>
@@ -189,22 +218,68 @@ export default function HomePage() {
                 <span>{searchError}</span>
               </div>
             )}
-            <Button
-              type="submit"
-              className="w-full h-12 text-lg font-semibold bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600 dark:from-indigo-700 dark:to-blue-900 dark:hover:from-indigo-800 dark:hover:to-blue-950 transition-all shadow-lg flex items-center justify-center gap-2"
-              disabled={
-                isSearching ||
-                (searchMode === 'basic' ? !isBasicValid : !isAdvancedValid)
-              }
-            >
+            {/* Alan seçildiyse uzmanlık kutusu formun içinde, Ara butonundan önce */}
+            {selectedField && specialtyOptions.length > 0 && (
+              <Card className="w-full max-w-2xl mx-auto mt-8 mb-8 p-8 shadow-2xl border border-primary/20 bg-white/90 dark:bg-card/80 animate-fade-in-up transition-all duration-500">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-primary">Uzmanlık Seçimi</h2>
+                  <button
+                    type="button"
+                    className="px-5 py-2 rounded-lg bg-primary text-white text-sm font-semibold shadow hover:bg-primary/80 transition border border-primary"
+                    onClick={() => {
+                      if (specialtyOptions.every(spec => selectedSpecialties.includes(spec))) {
+                        setSelectedSpecialties([]);
+                      } else {
+                        setSelectedSpecialties([...specialtyOptions]);
+                      }
+                    }}
+                  >
+                    {specialtyOptions.every(spec => selectedSpecialties.includes(spec)) ? "Tümünü Kaldır" : "Tümünü Seç"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {specialtyOptions.map((spec: string) => {
+                    const checked = selectedSpecialties.includes(spec);
+                    return (
+                      <label
+                        key={spec}
+                        className={`rounded-lg px-4 py-2 shadow-sm flex flex-col items-center justify-center h-28 w-full text-center transition-all duration-300 border cursor-pointer select-none
+                          ${checked ? 'bg-[hsl(var(--success))] text-white border-[hsl(var(--success))]' : 'bg-gray-200 dark:bg-[#23272f] text-foreground border-muted'}`}
+                        >
+                          <span className="flex flex-col items-center justify-center w-full">
+                            <span className="relative flex items-center justify-center mb-2">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={val => {
+                                  if (val) {
+                                    setSelectedSpecialties(prev => [...prev, spec]);
+                                  } else {
+                                    setSelectedSpecialties(prev => prev.filter(s => s !== spec));
+                                  }
+                                }}
+                                disabled={isSearching || Boolean(searchEmail.trim().length > 0)}
+                                className="w-5 h-5 transition-all duration-200 mr-0"
+                              />
+                            </span>
+                            <span className="text-base font-medium break-words whitespace-normal text-center flex-1 flex items-center justify-center leading-tight">
+                              {spec}
+                            </span>
+                          </span>
+                        </label>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+            <Button type="submit" className="w-full text-lg font-semibold bg-primary hover:bg-primary/90 text-white transition-colors duration-300 border-2 border-primary/30 shadow-sm" disabled={isSearching}>
               {isSearching ? (
                 <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
+                  <Loader2 className="animate-spin w-5 h-5 mr-2 inline-block" />
                   Aranıyor...
                 </>
               ) : (
                 <>
-                  <Search className="w-5 h-5 mr-2" />
+                  <SearchIcon className="w-5 h-5 mr-2" />
                   Ara
                 </>
               )}

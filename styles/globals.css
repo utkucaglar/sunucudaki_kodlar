@@ -91,3 +91,16 @@ body {
     @apply bg-background text-foreground;
   }
 }
+.force-scrollbar {
+  overflow-y: auto !important;
+  scrollbar-width: auto !important;
+}
+.force-scrollbar::-webkit-scrollbar {
+  width: 12px !important;
+  background: #e5e7eb !important;
+}
+.force-scrollbar::-webkit-scrollbar-thumb {
+  background: #888 !important;
+  border-radius: 8px !important;
+}
+

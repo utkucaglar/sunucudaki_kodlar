@@ -4,6 +4,7 @@ import base64
 import re
 import urllib.request
 import json
+import argparse
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -40,13 +41,27 @@ if len(sys.argv) < 3:
     print("Kullanım: python scrape_main_profile.py <isim> <sessionId>", flush=True)
     sys.exit(1)
 
-target_name = sys.argv[1]
-session_id = sys.argv[2]
+# Argparse ekle
+parser = argparse.ArgumentParser()
+parser.add_argument('name')
+parser.add_argument('session_id')
+parser.add_argument('--field', type=str, default=None)
+parser.add_argument('--specialties', type=str, default=None)
+args = parser.parse_args()
+
+target_name = args.name
+session_id = args.session_id
+selected_field = args.field
+selected_specialties = [s.strip() for s in args.specialties.split(',')] if args.specialties else []
 
 # --- YENİ KLASÖR YAPISI ---
 SESSION_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id)
 PROFILE_PICS_DIR = os.path.join(SESSION_DIR, "profile_pictures")
 os.makedirs(PROFILE_PICS_DIR, exist_ok=True)
+# PID bilgisini kaydet
+pid_path = os.path.join(SESSION_DIR, "scraper.pid")
+with open(pid_path, "w") as f:
+    f.write(str(os.getpid()))
 
 BASE = "https://akademik.yok.gov.tr/"
 DEFAULT_URL = BASE + "AkademikArama/authorimages/photo_m.jpg"
@@ -122,19 +137,31 @@ try:
             break
         profile_rows = driver.find_elements(By.CSS_SELECTOR, "tr[id^='authorInfo_']")
         print(f"[INFO] {page_num}. sayfada {len(profile_rows)} profil bulundu.", flush=True)
+        if len(profile_rows) == 0:
+            print("[INFO] Profil bulunamadı, döngü bitiyor.", flush=True)
+            break
         for row in profile_rows:
             try:
+                info_td = row.find_element(By.XPATH, "./td[h6]")
+                # Sadece green_label ve blue_label'ı hızlıca çek
+                all_links = info_td.find_elements(By.CSS_SELECTOR, 'a.anahtarKelime')
+                green_label = all_links[0].text.strip() if len(all_links) > 0 else ''
+                blue_label = all_links[1].text.strip() if len(all_links) > 1 else ''
+                # Eğer field ve specialties parametreleri varsa, filtre uygula
+                if selected_field and green_label != selected_field:
+                    continue
+                if selected_specialties and blue_label not in selected_specialties:
+                    continue
+                # Eşleşiyorsa, detayları scrape et
                 link = row.find_element(By.CSS_SELECTOR, "a")
                 link_text = link.text.strip()
                 url = link.get_attribute("href")
                 if url in profile_urls:
                     print(f"[SKIP] Profil zaten eklenmiş: {url}", flush=True)
                     continue
-                info_td = row.find_element(By.XPATH, "./td[h6]")
                 info = info_td.text.strip() if info_td else ""
                 img = row.find_element(By.CSS_SELECTOR, "img")
                 img_src = img.get_attribute("src") if img else None
-                # Doğru isim ve ünvan ayrımı
                 info_lines = info.splitlines()
                 if len(info_lines) > 1:
                     title = info_lines[0].strip()
@@ -142,22 +169,13 @@ try:
                 else:
                     title = link_text
                     name = link_text
-
                 header = info_lines[2].strip() if len(info_lines) > 2 else ''
-                all_links = info_td.find_elements(By.CSS_SELECTOR, 'a.anahtarKelime')
-                green_label = all_links[0].text.strip() if len(all_links) > 0 else ''
-                blue_label = all_links[1].text.strip() if len(all_links) > 1 else ''
-                # Anahtar kelimeleri hem linkli hem düz metin olarak al
-                # info_td.text: "Mühendislik Temel Alanı   Bilgisayar Bilimleri ve Mühendisliği Görüntü İşleme ; Yapay Öğrenme ; Algoritmalar ve Hesaplama Kuramı"
                 label_text = f"{green_label}   {blue_label}"
                 keywords_text = info_td.text.replace(label_text, '').strip()
-                # Başta veya sonda gereksiz karakterler varsa temizle
                 keywords_text = keywords_text.lstrip(';:,. \u000b\n\t')
-                # Satırlara böl, sadece son satırı anahtar kelime olarak al
                 lines = [l.strip() for l in keywords_text.split('\n') if l.strip()]
                 if lines:
                     keywords_line = lines[-1]
-                    # Eğer anahtar kelime satırı header ile aynıysa veya header'ı içeriyorsa boş bırak
                     if header.strip() == keywords_line or header.strip() in keywords_line:
                         keywords_str = ""
                     else:
@@ -165,7 +183,6 @@ try:
                         keywords_str = " ; ".join(keywords) if keywords else ""
                 else:
                     keywords_str = ""
-                # Email bilgisini çek
                 email = ''
                 try:
                     email_link = row.find_element(By.CSS_SELECTOR, "a[href^='mailto']")
@@ -218,6 +235,16 @@ try:
     with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
         json.dump(profiles, f, ensure_ascii=False, indent=2)
     print("[INFO] main_profile.json dosyası yazıldı.", flush=True)
+    # Scraping tamamlandı sinyali (main_done.txt)
+    if profiles:
+        done_path = os.path.join(SESSION_DIR, "main_done.txt")
+        with open(done_path, "w") as f:
+            f.write("done")
+            f.flush()
+            os.fsync(f.fileno())
+        if hasattr(os, "sync"):
+            os.sync()
+
 finally:
     driver.quit()
     print("[DEBUG] WebDriver kapatıldı.", flush=True) 
