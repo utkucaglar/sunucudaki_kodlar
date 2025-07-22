@@ -13,12 +13,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
-def save_base64_image(data_url: str, filename: str):
-    header, b64data = data_url.split(",", 1)
-    img_data = base64.b64decode(b64data)
-    with open(filename, "wb") as f:
-        f.write(img_data)
-
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[^A-Za-z0-9ĞÜŞİÖÇğüşiöç ]+', '_', name).strip().replace(" ", "_")
 
@@ -46,17 +40,9 @@ target_name = sys.argv[1]
 session_id = sys.argv[2]
 profile_url = sys.argv[3] if len(sys.argv) > 3 else None
 
-# --- YENİ KLASÖR YAPISI ---
-SESSION_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id)
-PROFILE_PICS_DIR = os.path.join(SESSION_DIR, "profile_pictures")
-os.makedirs(PROFILE_PICS_DIR, exist_ok=True)
-
 BASE = "https://akademik.yok.gov.tr/"
-DEFAULT_URL = BASE + "AkademikArama/authorimages/photo_m.jpg"
-default_photo_filename = os.path.join(PROFILE_PICS_DIR, "default_photo.jpg")
-urllib.request.urlretrieve(DEFAULT_URL, default_photo_filename)
-
-collaborators_json_path = os.path.join(SESSION_DIR, "collaborators.json")
+DEFAULT_PHOTO_URL = "/default_photo.jpg"
+collaborators_json_path = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id, "collaborators.json")
 
 options = webdriver.ChromeOptions()
 options.add_argument("--headless=new")
@@ -80,7 +66,6 @@ collaborators = []
 try:
     # Önce profil sayfasına git
     if profile_url:
-        # Doğrudan seçilen profilin URL'sine git
         driver.get(profile_url)
     else:
         driver.get(BASE + "AkademikArama/")
@@ -126,8 +111,6 @@ return results;
     for idx, obj in enumerate(isimler_ve_linkler, start=1):
         isim = obj['name']
         href = obj['href']
-        dest_file = f"collab_{idx}_{sanitize_filename(isim)}.jpg"
-        dest_path = os.path.join(PROFILE_PICS_DIR, dest_file)
         info = ""
         deleted = False
         title = ''
@@ -135,23 +118,16 @@ return results;
         green_label = ''
         blue_label = ''
         keywords_str = ''
+        photo_url = ''
+        email = ''  # <-- burada email'i başta boş string olarak tanımla
         if not href:
-            # Profil linki yok, varsayılan fotoğrafla atlanıyor.
-            try:
-                import shutil
-                shutil.copy(default_photo_filename, dest_path)
-            except Exception:
-                urllib.request.urlretrieve(DEFAULT_URL, dest_path)
+            photo_url = DEFAULT_PHOTO_URL
             deleted = True
         else:
             driver.get(href)
             tds = driver.find_elements(By.XPATH, "//td[h6]")
             if not tds:
-                try:
-                    import shutil
-                    shutil.copy(default_photo_filename, dest_path)
-                except Exception:
-                    urllib.request.urlretrieve(DEFAULT_URL, dest_path)
+                photo_url = DEFAULT_PHOTO_URL
                 deleted = True
             else:
                 info = tds[0].text
@@ -175,10 +151,8 @@ return results;
                 try:
                     blue_span = tds[0].find_element(By.CSS_SELECTOR, 'span.label-primary')
                     blue_label = blue_span.text.strip()
-                    # keywords: blue_label'dan hemen sonraki düz metni td'nin innerHTML'inden ayıkla
                     td_html = tds[0].get_attribute('innerHTML')
                     import re
-                    # Blue label'dan hemen sonra gelen düz metni bul
                     if isinstance(td_html, str):
                         m = re.search(r'<span[^>]*label-primary[^>]*>.*?</span>([^<]*)', td_html)
                         if m:
@@ -187,10 +161,7 @@ return results;
                                 keywords_str = kw
                 except Exception:
                     pass
-                # info alanı sadece header olacak (header alanı kaldırıldı)
                 info = info_lines[2].strip() if len(info_lines) > 2 else ''
-                # --- EMAIL SCRAPING ---
-                email = ''
                 try:
                     email_link = tds[0].find_element(By.CSS_SELECTOR, "a[href^='mailto']")
                     email = email_link.text.strip().replace('[at]', '@')
@@ -198,19 +169,13 @@ return results;
                     email = ''
                 try:
                     img = driver.find_element(By.CSS_SELECTOR, "img.img-circle")
-                    src = img.get_attribute("src")
-                    if src and src.startswith("data:image"):
-                        save_base64_image(src, dest_path)
-                    elif src:
-                        urllib.request.urlretrieve(src, dest_path)
-                    else:
-                        urllib.request.urlretrieve(DEFAULT_URL, dest_path)
-                except NoSuchElementException:
+                    photo_url = img.get_attribute("src")
+                except Exception:
                     try:
-                        import shutil
-                        shutil.copy(default_photo_filename, dest_path)
+                        img = driver.find_element(By.CSS_SELECTOR, "img#imgPicture")
+                        photo_url = img.get_attribute("src")
                     except Exception:
-                        urllib.request.urlretrieve(DEFAULT_URL, dest_path)
+                        photo_url = DEFAULT_PHOTO_URL
         collaborators.append({
             "id": idx,
             "name": isim,
@@ -219,13 +184,12 @@ return results;
             "green_label": green_label,
             "blue_label": blue_label,
             "keywords": keywords_str,
-            "photo": dest_file,
+            "photoUrl": photo_url,
             "status": "completed",
             "deleted": deleted,
             "url": href if not deleted else "",
             "email": email
         })
-        # Her işbirlikçi sonrası JSON'u güncelle
         with open(collaborators_json_path, "w", encoding="utf-8") as f:
             json.dump(collaborators, f, ensure_ascii=False, indent=2)
             f.flush()
@@ -236,7 +200,7 @@ return results;
         # Dosya sistemini tamamen senkronize et (Linux/Unix)
         if hasattr(os, "sync"):
             os.sync()
-        done_path = os.path.join(SESSION_DIR, "collaborators_done.txt")
+        done_path = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id, "collaborators_done.txt")
         with open(done_path, "w") as f:
             f.write("done")
             f.flush()

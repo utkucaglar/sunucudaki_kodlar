@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import { execSync, spawn } from "child_process";
+import fieldsData from "../../../public/fields.json";
 
 function generateSessionId() {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -9,78 +10,51 @@ function generateSessionId() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, field, specialties } = await request.json();
+    const { name, email, fieldId, specialtyIds } = await request.json();
     if (!name || !name.trim()) {
       return NextResponse.json({ error: "İsim gereklidir" }, { status: 400 });
     }
     const sessionId = generateSessionId();
     const scriptsDir = path.join(process.cwd(), "scripts");
-    // 1. Ana profil scraping (arka planda başlat)
-    const mainProfileScript = path.join(scriptsDir, "scrape_main_profile.py");
-    const pythonArgs = [mainProfileScript, name.trim(), sessionId];
-    if (field) pythonArgs.push('--field', field);
-    if (specialties && Array.isArray(specialties) && specialties.length > 0) {
-      pythonArgs.push('--specialties', specialties.join(','));
-    }
-    const pythonProc = spawn("python", pythonArgs, { detached: true, stdio: "ignore" });
-    // PID'i session klasörüne kaydet
     const sessionDir = path.join(process.cwd(), "public", "collaborator-sessions", sessionId);
-    const pidPath = path.join(sessionDir, "scraper.pid");
-    fs.mkdirSync(sessionDir, { recursive: true });
-    if (pythonProc.pid !== undefined) {
-      fs.writeFileSync(pidPath, pythonProc.pid.toString(), "utf-8");
-    }
-    pythonProc.unref();
-    // 2. Ana profil bilgisini incremental olarak oku (polling)
-    const mainProfilePath = path.join(process.cwd(), "public", "collaborator-sessions", sessionId, "main_profile.json");
-    let profiles: any[] = [];
-    let resolved = false;
-    const maxWaitMs = (email && email.trim().length > 0) ? 60000 : 30000; // E-posta aramasında 60 saniye, diğerlerinde 30 saniye
-    const startTime = Date.now();
-    
-    if (email && email.trim().length > 0) {
+    const mainProfilePath = path.join(sessionDir, "main_profile.json");
+    // Alan ve uzmanlık ile arama
+    if (fieldId && (Array.isArray(specialtyIds) && specialtyIds.length > 0)) {
+      let fieldName = "";
+      let specialtyNames: string[] = [];
+      const fieldObj = (Array.isArray(fieldsData) ? fieldsData : []).find((f: any) => f.id === fieldId || f.id === Number(fieldId));
+      if (fieldObj) {
+        fieldName = fieldObj.name;
+        if (specialtyIds.includes("all")) {
+          specialtyNames = fieldObj.specialties.map((s: any) => s.name);
+        } else {
+          specialtyNames = fieldObj.specialties.filter((s: any) => specialtyIds.includes(s.id) || specialtyIds.includes(Number(s.id))).map((s: any) => s.name);
+        }
+      }
+      // Profil scraping script'ini başlat
+      const mainProfileScript = path.join(scriptsDir, "scrape_main_profile.py");
+      const pythonArgs = [mainProfileScript, name.trim(), sessionId, '--field', fieldName, '--specialties', specialtyNames.join(",")];
+      const pythonProc = spawn("python", pythonArgs, { 
+        detached: true, 
+        stdio: "ignore",
+        windowsHide: true  // Windows'ta CMD penceresini gizle
+      });
+      fs.mkdirSync(sessionDir, { recursive: true });
+      pythonProc.unref();
+      // main_profile.json ve main_done.txt oluşana kadar bekle
+      const donePath = path.join(sessionDir, "main_done.txt");
       let waited = 0;
       const pollInterval = 500;
-      while (waited < maxWaitMs) {
-        if (fs.existsSync(mainProfilePath)) {
-          try {
-            const mainProfile = JSON.parse(fs.readFileSync(mainProfilePath, "utf-8"));
-            if (Array.isArray(mainProfile)) {
-              profiles = mainProfile;
-            } else if (mainProfile.profiles) {
-              profiles = mainProfile.profiles;
-            }
-            const emailLower = email.trim().toLowerCase();
-            const exactProfile = profiles.find((p: any) => (p.email || "").toLowerCase() === emailLower);
-            if (exactProfile) {
-              // PID dosyasını oku ve scraping'i durdur
-              if (fs.existsSync(pidPath)) {
-                const pid = parseInt(fs.readFileSync(pidPath, "utf-8"));
-                try { process.kill(pid); } catch (e) { /* zaten bitmiş olabilir */ }
-              }
-              return NextResponse.json({
-                sessionId,
-                mainProfile: exactProfile,
-                profiles: [exactProfile],
-                directCollaborators: true
-              });
-            }
-          } catch (e) { /* dosya yazılırken okunamazsa, bir sonraki döngüde tekrar dene */ }
+      const maxWaitMsField = 60000; // 1 dakika
+      while (waited < maxWaitMsField) {
+        if (fs.existsSync(mainProfilePath) && fs.existsSync(donePath)) {
+          break;
         }
         await new Promise(r => setTimeout(r, pollInterval));
         waited += pollInterval;
       }
-      // Timeout durumunda da scraping'i durdur
-      if (fs.existsSync(pidPath)) {
-        const pid = parseInt(fs.readFileSync(pidPath, "utf-8"));
-        try { process.kill(pid); } catch (e) { /* zaten bitmiş olabilir */ }
-      }
-      return NextResponse.json({ error: "Aradığınız profil bulunamadı, lütfen daha spesifik bir arama yapın." }, { status: 404 });
-    }
-    // E-posta ile arama değilse polling ile devam et
-    let waited = 0;
-    const pollInterval = 500;
-    while (waited < maxWaitMs) {
+      // main_profile.json'u oku
+      let profiles: any[] = [];
       if (fs.existsSync(mainProfilePath)) {
         try {
           const mainProfile = JSON.parse(fs.readFileSync(mainProfilePath, "utf-8"));
@@ -89,7 +63,103 @@ export async function POST(request: NextRequest) {
           } else if (mainProfile.profiles) {
             profiles = mainProfile.profiles;
           }
-          if (profiles.length >= 1) {
+        } catch (e) { /* dosya okunamazsa boş bırak */ }
+      }
+      if (profiles.length === 1) {
+        // Tek profil bulunduysa otomatik olarak işbirlikçi scraping başlat
+        const selectedProfile = profiles[0];
+        const collabScript = path.join(scriptsDir, "scrape_collaborators.py");
+        const pythonArgs2 = [collabScript, selectedProfile.name, sessionId, selectedProfile.url];
+        const pythonProc2 = spawn("python", pythonArgs2, { detached: true, stdio: "ignore" });
+        pythonProc2.unref();
+        // İşbirlikçi scraping tamamlanana kadar bekle
+        const collabPath = path.join(sessionDir, "collaborators.json");
+        const doneCollabPath = path.join(sessionDir, "collaborators_done.txt");
+        let collaborators = [];
+        let waited2 = 0;
+        const maxWaitMs2 = 240000; // 4 dakika
+        const pollInterval2 = 500;
+        while (waited2 < maxWaitMs2) {
+          if (fs.existsSync(collabPath) && fs.existsSync(doneCollabPath)) {
+            try {
+              collaborators = JSON.parse(fs.readFileSync(collabPath, "utf-8"));
+              break;
+            } catch (e) { /* dosya yazılırken okunamazsa, bir sonraki döngüde tekrar dene */ }
+          }
+          await new Promise(r => setTimeout(r, pollInterval2));
+          waited2 += pollInterval2;
+        }
+        return NextResponse.json({
+          sessionId,
+          profiles,
+          collaborators
+        });
+      }
+      // Birden fazla profil varsa mevcut davranış
+      if (profiles.length >= 1) {
+        return NextResponse.json({
+          sessionId,
+          profiles
+        });
+      } else {
+        return NextResponse.json({ error: "Profil bulunamadı veya zaman aşımı." }, { status: 404 });
+      }
+    }
+    // Email ile arama veya sadece isimle arama
+    const mainProfileScript = path.join(scriptsDir, "scrape_main_profile.py");
+    let pythonArgs = [mainProfileScript, name.trim(), sessionId];
+    
+    // Email varsa ekle
+    if (email && email.trim()) {
+      pythonArgs.push('--email', email.trim());
+    }
+    
+    const pythonProc = spawn("python", pythonArgs, { 
+      detached: true, 
+      stdio: "ignore",
+      windowsHide: true  // Windows'ta CMD penceresini gizle
+    });
+    fs.mkdirSync(sessionDir, { recursive: true });
+    pythonProc.unref();
+
+    // main_profile.json ve main_done.txt dosyalarını bekle
+    const donePath = path.join(sessionDir, "main_done.txt");
+    const collabPath = path.join(sessionDir, "collaborators.json");
+    const collabDonePath = path.join(sessionDir, "collaborators_done.txt");
+    
+    let profiles: any[] = [];
+    let waited = 0;
+    const pollInterval = 500;
+    const maxWaitMs = email && email.trim() ? 120000 : 60000; // Email varsa 2 dakika, yoksa 1 dakika
+    
+    while (waited < maxWaitMs) {
+      // Hem main_profile.json hem de main_done.txt dosyası var mı kontrol et
+      if (fs.existsSync(mainProfilePath) && fs.existsSync(donePath)) {
+        try {
+          const mainProfile = JSON.parse(fs.readFileSync(mainProfilePath, "utf-8"));
+          if (Array.isArray(mainProfile)) {
+            profiles = mainProfile;
+          } else if (mainProfile.profiles) {
+            profiles = mainProfile.profiles;
+          }
+          
+          // Email ile arama yapıldıysa collaborators dosyasını da kontrol et
+          if (email && email.trim()) {
+            // Email bulunmuş ve collaborators scraping tamamlanmışsa
+            if (fs.existsSync(collabPath) && fs.existsSync(collabDonePath)) {
+              try {
+                const collaborators = JSON.parse(fs.readFileSync(collabPath, "utf-8"));
+                return NextResponse.json({
+                  sessionId,
+                  profiles,
+                  collaborators,
+                  emailFound: true
+                });
+              } catch (e) { /* collaborators dosyası okunamazsa */ }
+            }
+            // Email arama henüz tamamlanmamış, devam et
+          } else {
+            // Email yok, normal arama tamamlandı
             break;
           }
         } catch (e) { /* dosya yazılırken okunamazsa, bir sonraki döngüde tekrar dene */ }
@@ -97,6 +167,53 @@ export async function POST(request: NextRequest) {
       await new Promise(r => setTimeout(r, pollInterval));
       waited += pollInterval;
     }
+    
+    // Email ile arama yapıldıysa ama email bulunamadıysa
+    if (email && email.trim() && profiles.length >= 1) {
+      return NextResponse.json({
+        sessionId,
+        profiles,
+        emailFound: false,
+        message: `Email '${email}' bulunamadı. ${profiles.length} profil listelendi.`
+      });
+    }
+    
+    // Email ile arama yapılmadıysa ve tek profil bulunduysa otomatik collaborators başlat
+    if (profiles.length === 1 && (!email || !email.trim())) {
+      // Tek profil bulunduysa otomatik olarak işbirlikçi scraping başlat
+      const selectedProfile = profiles[0];
+      const collabScript = path.join(scriptsDir, "scrape_collaborators.py");
+      const pythonArgs = [collabScript, selectedProfile.name, sessionId, selectedProfile.url];
+      const pythonProc2 = spawn("python", pythonArgs, { 
+        detached: true, 
+        stdio: "ignore",
+        windowsHide: true  // Windows'ta CMD penceresini gizle
+      });
+      pythonProc2.unref();
+      // İşbirlikçi scraping tamamlanana kadar bekle
+      const collabPath = path.join(sessionDir, "collaborators.json");
+      const donePath = path.join(sessionDir, "collaborators_done.txt");
+      let collaborators = [];
+      let waited2 = 0;
+      const maxWaitMs2 = 240000; // 4 dakika
+      const pollInterval2 = 500;
+      while (waited2 < maxWaitMs2) {
+        if (fs.existsSync(collabPath) && fs.existsSync(donePath)) {
+          try {
+            collaborators = JSON.parse(fs.readFileSync(collabPath, "utf-8"));
+            break;
+          } catch (e) { /* dosya yazılırken okunamazsa, bir sonraki döngüde tekrar dene */ }
+        }
+        await new Promise(r => setTimeout(r, pollInterval2));
+        waited2 += pollInterval2;
+      }
+      return NextResponse.json({
+        sessionId,
+        profiles,
+        collaborators
+      });
+    }
+    // Birden fazla profil varsa mevcut davranış
     if (profiles.length >= 1) {
       return NextResponse.json({
         sessionId,

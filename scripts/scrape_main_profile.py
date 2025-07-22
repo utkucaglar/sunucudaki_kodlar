@@ -47,26 +47,20 @@ parser.add_argument('name')
 parser.add_argument('session_id')
 parser.add_argument('--field', type=str, default=None)
 parser.add_argument('--specialties', type=str, default=None)
+parser.add_argument('--email', type=str, default=None)
 args = parser.parse_args()
 
 target_name = args.name
 session_id = args.session_id
 selected_field = args.field
 selected_specialties = [s.strip() for s in args.specialties.split(',')] if args.specialties else []
+target_email = args.email
 
 # --- YENİ KLASÖR YAPISI ---
 SESSION_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id)
-PROFILE_PICS_DIR = os.path.join(SESSION_DIR, "profile_pictures")
-os.makedirs(PROFILE_PICS_DIR, exist_ok=True)
-# PID bilgisini kaydet
-pid_path = os.path.join(SESSION_DIR, "scraper.pid")
-with open(pid_path, "w") as f:
-    f.write(str(os.getpid()))
 
 BASE = "https://akademik.yok.gov.tr/"
-DEFAULT_URL = BASE + "AkademikArama/authorimages/photo_m.jpg"
-default_photo_filename = os.path.join(PROFILE_PICS_DIR, "default_photo.jpg")
-urllib.request.urlretrieve(DEFAULT_URL, default_photo_filename)
+DEFAULT_PHOTO_URL = "/default_photo.jpg"
 
 options = webdriver.ChromeOptions()
 options.add_argument("--headless=new")
@@ -87,8 +81,6 @@ driver = webdriver.Chrome(
 driver.set_window_size(1920, 1080)
 
 main_profile_info = ""
-main_photo_file = f"profile_main.jpg"
-main_photo_path = os.path.join(PROFILE_PICS_DIR, main_photo_file)
 
 try:
     print("[DEBUG] Akademik Arama sayfası açılıyor...", flush=True)
@@ -105,15 +97,21 @@ try:
     except Exception as e:
         print(f"[DEBUG] Çerez butonu bulunamadı: {e}", flush=True)
     try:
+        # Her durumda normal arama yap (email varsa da)
         kutu = driver.find_element(By.ID, "aramaTerim")
         kutu.send_keys(target_name)
         driver.find_element(By.ID, "searchButton").click()
-        print(f"[DEBUG] '{target_name}' için arama yapıldı.", flush=True)
+        
+        if target_email:
+            print(f"[DEBUG] '{target_name}' için normal arama yapıldı. Email '{target_email}' ile eşleşme aranacak.", flush=True)
+        else:
+            print(f"[DEBUG] '{target_name}' için normal arama yapıldı.", flush=True)
     except Exception as e:
         print(f"[ERROR] Arama kutusu veya butonu bulunamadı: {e}", flush=True)
         driver.quit()
         sys.exit(1)
     try:
+        # Her durumda Akademisyenler sekmesine geç
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.LINK_TEXT, "Akademisyenler"))
         ).click()
@@ -126,6 +124,8 @@ try:
     profiles = []
     profile_urls = set()
     page_num = 1
+    # --- id sayaç değişkeni ekle ---
+    profile_id_counter = 1
     while True:
         print(f"[INFO] {page_num}. sayfa yükleniyor...", flush=True)
         try:
@@ -162,6 +162,8 @@ try:
                 info = info_td.text.strip() if info_td else ""
                 img = row.find_element(By.CSS_SELECTOR, "img")
                 img_src = img.get_attribute("src") if img else None
+                if not img_src:
+                    img_src = DEFAULT_PHOTO_URL
                 info_lines = info.splitlines()
                 if len(info_lines) > 1:
                     title = info_lines[0].strip()
@@ -189,7 +191,9 @@ try:
                     email = email_link.text.strip().replace('[at]', '@')
                 except Exception:
                     email = ''
+                # --- id ekle ---
                 profiles.append({
+                    "id": profile_id_counter,
                     "name": name,
                     "title": title,
                     "url": url,
@@ -201,11 +205,67 @@ try:
                     "keywords": keywords_str,
                     "email": email
                 })
+                profile_id_counter += 1
                 profile_urls.add(url)
                 print(f"[ADD] Profil eklendi: {name} - {url}", flush=True)
+                
+                # Email varsa her 20 profilde kontrol et
+                if target_email and len(profiles) % 20 == 0:
+                    print(f"[EMAIL_CHECK] {len(profiles)} profil toplandı, email kontrolü yapılıyor...", flush=True)
+                    
+                    # Email uyuşan profil var mı kontrol et
+                    matching_profile = None
+                    for profile in profiles:
+                        if profile.get('email', '').lower() == target_email.lower():
+                            matching_profile = profile
+                            break
+                    
+                    if matching_profile:
+                        print(f"[EMAIL_FOUND] Email eşleşmesi bulundu: {matching_profile['name']} - {matching_profile['email']}", flush=True)
+                        
+                        # JSON'a kaydet
+                        with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
+                            json.dump(profiles, f, ensure_ascii=False, indent=2)
+                        
+                        # main_done.txt oluştur
+                        with open(os.path.join(SESSION_DIR, "main_done.txt"), "w") as f:
+                            f.write("completed")
+                        
+                        # Collaborators scriptini başlat
+                        import subprocess
+                        collab_script = os.path.join(os.path.dirname(__file__), "scrape_collaborators.py")
+                        
+                        # Windows'ta CMD penceresini gizle
+                        startupinfo = None
+                        if os.name == 'nt':  # Windows
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 0  # SW_HIDE = 0
+                        
+                        subprocess.Popen([
+                            "python", collab_script, 
+                            matching_profile['name'], 
+                            session_id, 
+                            matching_profile['url']
+                        ], cwd=os.path.dirname(__file__), startupinfo=startupinfo)
+                        
+                        print(f"[COLLABORATORS] İşbirlikçi scraping başlatıldı: {matching_profile['name']}", flush=True)
+                        driver.quit()
+                        sys.exit(0)
+                
+                # 100 kişi limitini kontrol et
+                if len(profiles) >= 100:
+                    print(f"[LIMIT] 100 kişi limitine ulaşıldı. Toplam: {len(profiles)} profil", flush=True)
+                    break
             except Exception as e:
                 print(f"[ERROR] Profil satırı işlenemedi: {e}", flush=True)
+        
         print(f"[INFO] Şu ana kadar {len(profiles)} profil toplandı.", flush=True)
+        
+        # 100 kişi limitine ulaşıldıysa ana döngüden çık
+        if len(profiles) >= 100:
+            print(f"[LIMIT] 100 kişi limitine ulaşıldı. Scraping tamamlandı.", flush=True)
+            break
         # Her sayfa sonunda incremental olarak dosyaya yaz
         try:
             with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
@@ -231,7 +291,7 @@ try:
         except Exception as e:
             print(f"[INFO] Sonraki sayfa bulunamadı veya tıklanamadı: {e}", flush=True)
             break
-    print(f"[INFO] Toplam {len(profiles)} profil toplandı. JSON'a yazılıyor...", flush=True)
+    print(f"[INFO] Toplam {len(profiles)} profil toplandı (maksimum 100). JSON'a yazılıyor...", flush=True)
     with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
         json.dump(profiles, f, ensure_ascii=False, indent=2)
     print("[INFO] main_profile.json dosyası yazıldı.", flush=True)
