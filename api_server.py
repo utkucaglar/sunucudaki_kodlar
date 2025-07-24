@@ -220,9 +220,10 @@ async def api_search(request: SearchRequest):
     raise HTTPException(status_code=404, detail="Profil bulunamadı veya zaman aşımı")
 
 @app.post("/api/collaborators/{session_id}")
-async def api_collaborators(session_id: str, request: Optional[CollaboratorsRequest] = None):
+async def api_collaborators(session_id: str, request: dict = None):
     """Get collaborators for a session or start collaborator scraping"""
     print(f"👥 Getting collaborators for session: {session_id}")
+    print(f"🔧 Request data: {request}")
     
     session_dir = Path("/var/www/akademik-tinder/public/collaborator-sessions") / session_id
     collab_path = session_dir / "collaborators.json"
@@ -248,10 +249,70 @@ async def api_collaborators(session_id: str, request: Optional[CollaboratorsRequ
         except Exception as e:
             print(f"⚠️ Error reading existing collaborators: {e}")
     
-    # If no collaborators exist, we need profile selection
+    # If no collaborators exist, check if we need to start scraping
     main_profile_path = session_dir / "main_profile.json"
     if not main_profile_path.exists():
         raise HTTPException(status_code=404, detail="Session bulunamadı")
+    
+    # If profileId is provided, start collaborator scraping
+    if request and "profileId" in request:
+        try:
+            with open(main_profile_path, 'r', encoding='utf-8') as f:
+                profiles = json.load(f)
+            
+            # Find selected profile
+            profile_id = request["profileId"]
+            selected_profile = None
+            
+            for profile in profiles:
+                if profile.get("id") == profile_id:
+                    selected_profile = profile
+                    break
+            
+            if not selected_profile:
+                raise HTTPException(status_code=404, detail="Seçilen profil bulunamadı")
+            
+            # Start collaborator scraping
+            scripts_dir = Path("/var/www/akademik-tinder/scripts")
+            collab_script = scripts_dir / "scrape_collaborators.py"
+            collab_args = [
+                "/var/www/akademik-tinder/venv/bin/python",
+                str(collab_script),
+                selected_profile['name'],
+                session_id,
+                selected_profile['url']
+            ]
+            
+            print(f"🚀 Starting collaborator scraping for: {selected_profile['name']}")
+            
+            try:
+                collab_process = subprocess.Popen(
+                    collab_args,
+                    cwd="/var/www/akademik-tinder",
+                    env={**os.environ, "PATH": "/var/www/akademik-tinder/venv/bin:" + os.environ.get("PATH", "")},
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                print(f"✅ Started collaborator scraping with PID: {collab_process.pid}")
+                
+                return {
+                    "success": True,
+                    "sessionId": session_id,
+                    "message": "Collaborator scraping başlatıldı",
+                    "profile": selected_profile,
+                    "collaborators": [],
+                    "total_collaborators": 0,
+                    "completed": False,
+                    "scraping_started": True
+                }
+                
+            except Exception as e:
+                print(f"⚠️ Failed to start collaborator scraping: {e}")
+                raise HTTPException(status_code=500, detail=f"Collaborator scraping başlatılamadı: {e}")
+                
+        except Exception as e:
+            print(f"⚠️ Error processing profile selection: {e}")
+            raise HTTPException(status_code=500, detail=f"Profil seçimi işlenirken hata: {e}")
     
     # For now, return empty collaborators (manual selection needed)
     return {
