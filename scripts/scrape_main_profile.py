@@ -187,24 +187,68 @@ try:
                     except Exception:
                         email = ''
                     
-                    lightweight_profile = {
-                        "id": profile_id_counter,
-                        "name": link_text,
-                        "url": url,
-                        "email": email
-                    }
-                    
-                    profiles.append(lightweight_profile)
-                    profile_id_counter += 1
-                    profile_urls.add(url)
-                    print(f"[ADD] Lightweight profil eklendi: {link_text} - {email}", flush=True)
-                    
-                    # Email eşleşmesi kontrolü
+                    # Email eşleşmesi kontrolü önce yap
                     if email.lower() == target_email.lower():
                         print(f"[EMAIL_FOUND] Email eşleşmesi bulundu: {link_text} - {email}", flush=True)
-                        # Sadece eşleşen profili kaydet
+                        
+                        # Detaylı profil bilgilerini çek
+                        try:
+                            info = info_td.text.strip() if info_td else ""
+                            img = row.find_element(By.CSS_SELECTOR, "img")
+                            img_src = img.get_attribute("src") if img else None
+                            if not img_src:
+                                img_src = DEFAULT_PHOTO_URL
+                            
+                            info_lines = info.splitlines()
+                            if len(info_lines) > 1:
+                                title = info_lines[0].strip()
+                                name = info_lines[1].strip()
+                            else:
+                                title = link_text
+                                name = link_text
+                            
+                            header = info_lines[2].strip() if len(info_lines) > 2 else ''
+                            
+                            # Label parsing
+                            label_text = f"{green_label}   {blue_label}"
+                            keywords_text = info_td.text.replace(label_text, '').strip()
+                            keywords_text = keywords_text.lstrip(';:,. \u000b\n\t')
+                            lines = [l.strip() for l in keywords_text.split('\n') if l.strip()]
+                            
+                            if lines:
+                                keywords_line = lines[-1]
+                                if header.strip() == keywords_line or header.strip() in keywords_line:
+                                    keywords_str = ""
+                                else:
+                                    keywords = [k.strip() for k in keywords_line.split(';') if k.strip()]
+                                    keywords_str = " ; ".join(keywords) if keywords else ""
+                            else:
+                                keywords_str = ""
+                            
+                            # Detaylı profil objesi oluştur
+                            detailed_profile = {
+                                "id": profile_id_counter,
+                                "name": name,
+                                "title": title,
+                                "url": url,
+                                "info": info,
+                                "photoUrl": img_src,
+                                "header": header,
+                                "green_label": green_label,
+                                "blue_label": blue_label,
+                                "keywords": keywords_str,
+                                "email": email
+                            }
+                            
+                            print(f"[EMAIL_DETAILED] Detaylı profil oluşturuldu: {name} - {title}", flush=True)
+                            
+                        except Exception as e:
+                            print(f"[ERROR] Detaylı profil çekerken hata: {e}, lightweight kullanılıyor", flush=True)
+                            detailed_profile = lightweight_profile
+                        
+                        # Detaylı profili kaydet
                         with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
-                            json.dump([lightweight_profile], f, ensure_ascii=False, indent=2)
+                            json.dump([detailed_profile], f, ensure_ascii=False, indent=2)
                         
                         # main_done.txt oluştur
                         with open(os.path.join(SESSION_DIR, "main_done.txt"), "w") as f:
@@ -221,6 +265,20 @@ try:
                         print(f"[COLLABORATORS] İşbirlikçi scraping başlatıldı: {link_text}", flush=True)
                         driver.quit()
                         sys.exit(0)
+                    
+                    else:
+                        # Email eşleşmezse lightweight profil ekle
+                        lightweight_profile = {
+                            "id": profile_id_counter,
+                            "name": link_text,
+                            "url": url,
+                            "email": email
+                        }
+                        
+                        profiles.append(lightweight_profile)
+                        profile_id_counter += 1
+                        profile_urls.add(url)
+                        print(f"[ADD] Lightweight profil eklendi: {link_text} - {email}", flush=True)
                 
                 else:
                     # Normal detaylı scraping (email yok)
