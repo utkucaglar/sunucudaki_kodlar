@@ -1,0 +1,17 @@
+
+> my-v0-project@0.1.0 dev
+> next dev -p 3002 -H 0.0.0.0
+
+file:///root/yok-akademik/next.config.mjs:1
+module.exports = { 
+^
+
+ReferenceError: module is not defined in ES module scope
+    at file:///root/yok-akademik/next.config.mjs:1:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:195:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:337:24)
+    at async importModuleDynamicallyWrapper (node:internal/vm/module:432:15)
+    at async loadConfig (/root/yok-akademik/node_modules/next/dist/server/config.js:964:36)
+    at async Module.nextDev (/root/yok-akademik/node_modules/next/dist/cli/next-dev.js:190:14)
+
+Node.js v18.20.8

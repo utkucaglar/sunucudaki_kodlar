@@ -48,6 +48,19 @@ options = webdriver.ChromeOptions()
 options.add_argument("--headless=new")
 options.add_argument("--disable-gpu")
 options.add_argument("user-agent=Mozilla/5.0")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-setuid-sandbox")
+options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--disable-extensions")
+options.binary_location = "/snap/bin/chromium"
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-background-networking")
+options.add_argument("--disable-default-apps")
+options.add_argument("--disable-sync")
+options.add_argument("--no-first-run")
+options.add_argument("--disable-web-security")
+options.add_argument("--window-size=1920,1080")
 prefs = {
     "profile.managed_default_content_settings.images": 2,
     "profile.managed_default_content_settings.stylesheets": 2,
@@ -56,7 +69,7 @@ prefs = {
 options.add_experimental_option("prefs", prefs)
 
 driver = webdriver.Chrome(
-    service=Service(ChromeDriverManager().install()),
+    service=Service("/usr/local/bin/chromedriver"),
     options=options
 )
 driver.set_window_size(1920, 1080)

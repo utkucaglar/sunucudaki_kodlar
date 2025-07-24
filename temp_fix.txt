@@ -1,0 +1,6 @@
+            const pythonProc2 = spawn("/var/www/akademik-tinder/venv/bin/python", pythonArgs2, {
+              cwd: process.cwd(),
+              env: { ...process.env, PATH: "/var/www/akademik-tinder/venv/bin:" + process.env.PATH },
+              detached: true,
+              stdio: "ignore"
+            });

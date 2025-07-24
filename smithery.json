@@ -2,11 +2,11 @@
   "mcpServers": {
     "yok-akademik": {
       "command": "node",
-      "args": ["mcp-server.js"],
-      "description": "YÖK Akademik - Akademisyen arama ve işbirlikçi bulma sistemi",
+      "args": ["mcp-server-smithery.js"],
+      "description": "YÖK Akademik - Public API üzerinden akademisyen arama ve işbirlikçi bulma",
       "version": "1.0.0",
       "author": "YÖK Akademik Team",
       "license": "MIT"
     }
   }
-} 
+}

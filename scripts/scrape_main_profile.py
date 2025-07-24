@@ -58,20 +58,37 @@ target_email = args.email
 
 # --- YENİ KLASÖR YAPISI ---
 SESSION_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "collaborator-sessions", session_id)
+print(f"[DEBUG] SESSION_DIR: {SESSION_DIR}", flush=True)
+
+# Session directory'yi oluştur
+os.makedirs(SESSION_DIR, exist_ok=True)
 
 BASE = "https://akademik.yok.gov.tr/"
 DEFAULT_PHOTO_URL = "/default_photo.jpg"
 
 options = webdriver.ChromeOptions()
-options.add_argument("--headless=new")
+options.add_argument("--headless")
 options.add_argument("--disable-gpu")
 options.add_argument("user-agent=Mozilla/5.0")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-extensions")
+options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--disable-background-timer-throttling")
+options.add_argument("--disable-backgrounding-occluded-windows")
+options.add_argument("--disable-renderer-backgrounding")
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-background-timer-throttling")
+options.add_argument("--disable-backgrounding-occluded-windows")
+options.add_argument("--disable-features=TranslateUI")
+options.add_argument("--disable-ipc-flooding-protection")
 prefs = {
     "profile.managed_default_content_settings.images": 2,
     "profile.managed_default_content_settings.stylesheets": 2,
     "profile.managed_default_content_settings.fonts": 2,
 }
 options.add_experimental_option("prefs", prefs)
+options.binary_location = "/usr/bin/google-chrome"
 
 print("[DEBUG] WebDriver başlatılıyor...", flush=True)
 driver = webdriver.Chrome(
@@ -159,112 +176,118 @@ try:
                 if url in profile_urls:
                     print(f"[SKIP] Profil zaten eklenmiş: {url}", flush=True)
                     continue
-                info = info_td.text.strip() if info_td else ""
-                img = row.find_element(By.CSS_SELECTOR, "img")
-                img_src = img.get_attribute("src") if img else None
-                if not img_src:
-                    img_src = DEFAULT_PHOTO_URL
-                info_lines = info.splitlines()
-                if len(info_lines) > 1:
-                    title = info_lines[0].strip()
-                    name = info_lines[1].strip()
-                else:
-                    title = link_text
-                    name = link_text
-                header = info_lines[2].strip() if len(info_lines) > 2 else ''
-                label_text = f"{green_label}   {blue_label}"
-                keywords_text = info_td.text.replace(label_text, '').strip()
-                keywords_text = keywords_text.lstrip(';:,. \u000b\n\t')
-                lines = [l.strip() for l in keywords_text.split('\n') if l.strip()]
-                if lines:
-                    keywords_line = lines[-1]
-                    if header.strip() == keywords_line or header.strip() in keywords_line:
-                        keywords_str = ""
-                    else:
-                        keywords = [k.strip() for k in keywords_line.split(';') if k.strip()]
-                        keywords_str = " ; ".join(keywords) if keywords else ""
-                else:
-                    keywords_str = ""
-                email = ''
-                try:
-                    email_link = row.find_element(By.CSS_SELECTOR, "a[href^='mailto']")
-                    email = email_link.text.strip().replace('[at]', '@')
-                except Exception:
-                    email = ''
-                # --- id ekle ---
-                profiles.append({
-                    "id": profile_id_counter,
-                    "name": name,
-                    "title": title,
-                    "url": url,
-                    "info": info,
-                    "photoUrl": img_src,
-                    "header": header,
-                    "green_label": green_label,
-                    "blue_label": blue_label,
-                    "keywords": keywords_str,
-                    "email": email
-                })
-                profile_id_counter += 1
-                profile_urls.add(url)
-                print(f"[ADD] Profil eklendi: {name} - {url}", flush=True)
                 
-                # Email varsa her 20 profilde kontrol et
-                if target_email and len(profiles) % 20 == 0:
-                    print(f"[EMAIL_CHECK] {len(profiles)} profil toplandı, email kontrolü yapılıyor...", flush=True)
+                # Email araması için lightweight mode
+                if target_email:
+                    # Sadece temel bilgileri al
+                    email = ''
+                    try:
+                        email_link = row.find_element(By.CSS_SELECTOR, "a[href^='mailto']")
+                        email = email_link.text.strip().replace('[at]', '@')
+                    except Exception:
+                        email = ''
                     
-                    # Email uyuşan profil var mı kontrol et
-                    matching_profile = None
-                    for profile in profiles:
-                        if profile.get('email', '').lower() == target_email.lower():
-                            matching_profile = profile
-                            break
+                    lightweight_profile = {
+                        "id": profile_id_counter,
+                        "name": link_text,
+                        "url": url,
+                        "email": email
+                    }
                     
-                    if matching_profile:
-                        print(f"[EMAIL_FOUND] Email eşleşmesi bulundu: {matching_profile['name']} - {matching_profile['email']}", flush=True)
-                        
-                        # JSON'a kaydet
+                    profiles.append(lightweight_profile)
+                    profile_id_counter += 1
+                    profile_urls.add(url)
+                    print(f"[ADD] Lightweight profil eklendi: {link_text} - {email}", flush=True)
+                    
+                    # Email eşleşmesi kontrolü
+                    if email.lower() == target_email.lower():
+                        print(f"[EMAIL_FOUND] Email eşleşmesi bulundu: {link_text} - {email}", flush=True)
+                        # Sadece eşleşen profili kaydet
                         with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
-                            json.dump(profiles, f, ensure_ascii=False, indent=2)
+                            json.dump([lightweight_profile], f, ensure_ascii=False, indent=2)
                         
                         # main_done.txt oluştur
                         with open(os.path.join(SESSION_DIR, "main_done.txt"), "w") as f:
                             f.write("completed")
                         
-                        # Collaborators scriptini başlat
+                        # Collaborators başlat
                         import subprocess
                         collab_script = os.path.join(os.path.dirname(__file__), "scrape_collaborators.py")
-                        
-                        # Windows'ta CMD penceresini gizle
-                        startupinfo = None
-                        if os.name == 'nt':  # Windows
-                            startupinfo = subprocess.STARTUPINFO()
-                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                            startupinfo.wShowWindow = 0  # SW_HIDE = 0
-                        
                         subprocess.Popen([
-                            "python", collab_script, 
-                            matching_profile['name'], 
-                            session_id, 
-                            matching_profile['url']
-                        ], cwd=os.path.dirname(__file__), startupinfo=startupinfo)
+                            "/var/www/akademik-tinder/venv/bin/python", collab_script,
+                            link_text, session_id, url
+                        ], cwd=os.path.dirname(__file__))
                         
-                        print(f"[COLLABORATORS] İşbirlikçi scraping başlatıldı: {matching_profile['name']}", flush=True)
+                        print(f"[COLLABORATORS] İşbirlikçi scraping başlatıldı: {link_text}", flush=True)
                         driver.quit()
                         sys.exit(0)
                 
-                # 100 kişi limitini kontrol et
-                if len(profiles) >= 100:
-                    print(f"[LIMIT] 100 kişi limitine ulaşıldı. Toplam: {len(profiles)} profil", flush=True)
+                else:
+                    # Normal detaylı scraping (email yok)
+                    info = info_td.text.strip() if info_td else ""
+                    img = row.find_element(By.CSS_SELECTOR, "img")
+                    img_src = img.get_attribute("src") if img else None
+                    if not img_src:
+                        img_src = DEFAULT_PHOTO_URL
+                    info_lines = info.splitlines()
+                    if len(info_lines) > 1:
+                        title = info_lines[0].strip()
+                        name = info_lines[1].strip()
+                    else:
+                        title = link_text
+                        name = link_text
+                    header = info_lines[2].strip() if len(info_lines) > 2 else ''
+                    label_text = f"{green_label}   {blue_label}"
+                    keywords_text = info_td.text.replace(label_text, '').strip()
+                    keywords_text = keywords_text.lstrip(';:,. \u000b\n\t')
+                    lines = [l.strip() for l in keywords_text.split('\n') if l.strip()]
+                    if lines:
+                        keywords_line = lines[-1]
+                        if header.strip() == keywords_line or header.strip() in keywords_line:
+                            keywords_str = ""
+                        else:
+                            keywords = [k.strip() for k in keywords_line.split(';') if k.strip()]
+                            keywords_str = " ; ".join(keywords) if keywords else ""
+                    else:
+                        keywords_str = ""
+                    email = ''
+                    try:
+                        email_link = row.find_element(By.CSS_SELECTOR, "a[href^='mailto']")
+                        email = email_link.text.strip().replace('[at]', '@')
+                    except Exception:
+                        email = ''
+                    # --- id ekle ---
+                    profiles.append({
+                        "id": profile_id_counter,
+                        "name": name,
+                        "title": title,
+                        "url": url,
+                        "info": info,
+                        "photoUrl": img_src,
+                        "header": header,
+                        "green_label": green_label,
+                        "blue_label": blue_label,
+                        "keywords": keywords_str,
+                        "email": email
+                    })
+                    profile_id_counter += 1
+                    profile_urls.add(url)
+                    print(f"[ADD] Profil eklendi: {name} - {url}", flush=True)
+                
+                # Limit kontrolü
+                max_profiles = 100 if target_email else 20
+                if len(profiles) >= max_profiles:
+                    print(f"[LIMIT] {max_profiles} kişi limitine ulaşıldı. Toplam: {len(profiles)} profil", flush=True)
                     break
             except Exception as e:
                 print(f"[ERROR] Profil satırı işlenemedi: {e}", flush=True)
         
         print(f"[INFO] Şu ana kadar {len(profiles)} profil toplandı.", flush=True)
         
-        # 100 kişi limitine ulaşıldıysa ana döngüden çık
-        if len(profiles) >= 100:
-            print(f"[LIMIT] 100 kişi limitine ulaşıldı. Scraping tamamlandı.", flush=True)
+        # Limit kontrolü ana döngü için
+        max_profiles = 100 if target_email else 20
+        if len(profiles) >= max_profiles:
+            print(f"[LIMIT] {max_profiles} kişi limitine ulaşıldı. Scraping tamamlandı.", flush=True)
             break
         # Her sayfa sonunda incremental olarak dosyaya yaz
         try:
@@ -291,15 +314,24 @@ try:
         except Exception as e:
             print(f"[INFO] Sonraki sayfa bulunamadı veya tıklanamadı: {e}", flush=True)
             break
-    print(f"[INFO] Toplam {len(profiles)} profil toplandı (maksimum 100). JSON'a yazılıyor...", flush=True)
-    with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
-        json.dump(profiles, f, ensure_ascii=False, indent=2)
+    
+    print(f"[INFO] Toplam {len(profiles)} profil toplandı. JSON'a yazılıyor...", flush=True)
+    
+    # Email araması yapıldıysa ve email bulunamadıysa
+    if target_email:
+        result = {"profiles": profiles, "email_found": False, "message": f"Email '{target_email}' bulunamadı. {len(profiles)} profil tarandı."}
+        with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+    else:
+        with open(os.path.join(SESSION_DIR, "main_profile.json"), "w", encoding="utf-8") as f:
+            json.dump(profiles, f, ensure_ascii=False, indent=2)
+    
     print("[INFO] main_profile.json dosyası yazıldı.", flush=True)
     # Scraping tamamlandı sinyali (main_done.txt)
     if profiles:
         done_path = os.path.join(SESSION_DIR, "main_done.txt")
         with open(done_path, "w") as f:
-            f.write("done")
+            f.write("completed")
             f.flush()
             os.fsync(f.fileno())
         if hasattr(os, "sync"):
@@ -307,4 +339,4 @@ try:
 
 finally:
     driver.quit()
-    print("[DEBUG] WebDriver kapatıldı.", flush=True) 
+    print("[DEBUG] WebDriver kapatıldı.", flush=True)

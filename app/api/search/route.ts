@@ -34,7 +34,9 @@ export async function POST(request: NextRequest) {
       // Profil scraping script'ini başlat
       const mainProfileScript = path.join(scriptsDir, "scrape_main_profile.py");
       const pythonArgs = [mainProfileScript, name.trim(), sessionId, '--field', fieldName, '--specialties', specialtyNames.join(",")];
-      const pythonProc = spawn("python", pythonArgs, { 
+      const pythonProc = spawn("/var/www/akademik-tinder/venv/bin/python", pythonArgs, { 
+        cwd: process.cwd(),
+        env: { ...process.env, PATH: "/var/www/akademik-tinder/venv/bin:" + process.env.PATH },
         detached: true, 
         stdio: "ignore",
         windowsHide: true  // Windows'ta CMD penceresini gizle
@@ -70,7 +72,12 @@ export async function POST(request: NextRequest) {
         const selectedProfile = profiles[0];
         const collabScript = path.join(scriptsDir, "scrape_collaborators.py");
         const pythonArgs2 = [collabScript, selectedProfile.name, sessionId, selectedProfile.url];
-        const pythonProc2 = spawn("python", pythonArgs2, { detached: true, stdio: "ignore" });
+            const pythonProc2 = spawn("/var/www/akademik-tinder/venv/bin/python", pythonArgs2, {
+              cwd: process.cwd(),
+              env: { ...process.env, PATH: "/var/www/akademik-tinder/venv/bin:" + process.env.PATH },
+              detached: true,
+              stdio: "ignore"
+            });
         pythonProc2.unref();
         // İşbirlikçi scraping tamamlanana kadar bekle
         const collabPath = path.join(sessionDir, "collaborators.json");
@@ -114,7 +121,9 @@ export async function POST(request: NextRequest) {
       pythonArgs.push('--email', email.trim());
     }
     
-    const pythonProc = spawn("python", pythonArgs, { 
+    const pythonProc = spawn("/var/www/akademik-tinder/venv/bin/python", pythonArgs, { 
+        cwd: process.cwd(),
+        env: { ...process.env, PATH: "/var/www/akademik-tinder/venv/bin:" + process.env.PATH },
       detached: true, 
       stdio: "ignore",
       windowsHide: true  // Windows'ta CMD penceresini gizle
@@ -184,7 +193,9 @@ export async function POST(request: NextRequest) {
       const selectedProfile = profiles[0];
       const collabScript = path.join(scriptsDir, "scrape_collaborators.py");
       const pythonArgs = [collabScript, selectedProfile.name, sessionId, selectedProfile.url];
-      const pythonProc2 = spawn("python", pythonArgs, { 
+      const pythonProc2 = spawn("/var/www/akademik-tinder/venv/bin/python", pythonArgs, { 
+        cwd: process.cwd(),
+        env: { ...process.env, PATH: "/var/www/akademik-tinder/venv/bin:" + process.env.PATH },
         detached: true, 
         stdio: "ignore",
         windowsHide: true  // Windows'ta CMD penceresini gizle
