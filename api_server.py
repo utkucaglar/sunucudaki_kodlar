@@ -324,6 +324,52 @@ async def api_collaborators(session_id: str, request: dict = None):
         "message": "Collaborator scraping için profil seçimi gerekli"
     }
 
+@app.get("/api/collaborators/{session_id}")
+async def get_collaborators_progress(session_id: str):
+    """Get current progress of collaborator scraping"""
+    print(f"📊 Getting collaborator progress for session: {session_id}")
+    
+    session_dir = Path("/var/www/akademik-tinder/public/collaborator-sessions") / session_id
+    collab_path = session_dir / "collaborators.json"
+    done_path = session_dir / "collaborators_done.txt"
+    
+    # Check if session exists
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="Session bulunamadı")
+    
+    collaborators = []
+    completed = False
+    
+    # Read current collaborators if file exists
+    if collab_path.exists():
+        try:
+            with open(collab_path, 'r', encoding='utf-8') as f:
+                collaborators = json.load(f)
+        except Exception as e:
+            print(f"⚠️ Error reading collaborators file: {e}")
+            collaborators = []
+    
+    # Check if scraping is completed
+    completed = done_path.exists()
+    
+    # Determine status message
+    if completed:
+        status_message = f"✅ Scraping tamamlandı! {len(collaborators)} işbirlikçi bulundu."
+    elif len(collaborators) > 0:
+        status_message = f"🔄 Scraping devam ediyor... {len(collaborators)} işbirlikçi bulundu."
+    else:
+        status_message = "⏳ Scraping başlatılıyor..."
+    
+    return {
+        "success": True,
+        "sessionId": session_id,
+        "collaborators": collaborators,
+        "total_collaborators": len(collaborators),
+        "completed": completed,
+        "status": status_message,
+        "timestamp": int(time.time())
+    }
+
 @app.get("/")
 async def root():
     return {
