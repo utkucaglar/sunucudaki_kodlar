@@ -254,25 +254,21 @@ async def api_collaborators(session_id: str, request: dict = None):
     if not main_profile_path.exists():
         raise HTTPException(status_code=404, detail="Session bulunamadı")
     
-    # If profileId is provided, start collaborator scraping
+    # Progressive POST: profileId ile çağrılırsa scraping başlat ve anlık dosya içeriği dön
     if request and "profileId" in request:
         try:
             with open(main_profile_path, 'r', encoding='utf-8') as f:
                 profiles = json.load(f)
-            
             # Find selected profile
             profile_id = request["profileId"]
             selected_profile = None
-            
             for profile in profiles:
                 if profile.get("id") == profile_id:
                     selected_profile = profile
                     break
-            
             if not selected_profile:
                 raise HTTPException(status_code=404, detail="Seçilen profil bulunamadı")
-            
-            # Start collaborator scraping
+            # Start collaborator scraping (idempotent)
             scripts_dir = Path("/var/www/akademik-tinder/scripts")
             collab_script = scripts_dir / "scrape_collaborators.py"
             collab_args = [
@@ -282,70 +278,39 @@ async def api_collaborators(session_id: str, request: dict = None):
                 session_id,
                 selected_profile['url']
             ]
-            
-            print(f"🚀 Starting collaborator scraping for: {selected_profile['name']}")
-            
-            try:
-                collab_process = subprocess.Popen(
-                    collab_args,
-                    cwd="/var/www/akademik-tinder",
-                    env={**os.environ, "PATH": "/var/www/akademik-tinder/venv/bin:" + os.environ.get("PATH", "")},
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"✅ Started collaborator scraping with PID: {collab_process.pid}")
-                
-                # Scraping başlatıldı, şimdi tamamlanmasını bekle
-                print(f"⏳ Waiting for collaborator scraping to complete...")
-                wait_time = 0
-                max_wait = 300  # 5 dakika maximum wait
-                check_interval = 2  # 2 saniye aralıklarla kontrol
-                
-                while wait_time < max_wait:
-                    if (session_dir / "collaborators_done.txt").exists():
-                        print(f"✅ Collaborator scraping completed after {wait_time} seconds")
-                        break
-                    
-                    await asyncio.sleep(check_interval)
-                    wait_time += check_interval
-                    
-                    if wait_time % 10 == 0:  # Her 10 saniyede log
-                        print(f"⏳ Still waiting for collaborators... {wait_time}s elapsed")
-                
-                if not (session_dir / "collaborators_done.txt").exists():
-                    print(f"⚠️ Collaborator scraping timeout after {max_wait} seconds")
-                    raise HTTPException(
-                        status_code=408, 
-                        detail=f"Collaborator scraping zaman aşımı. {max_wait} saniye sonra tamamlanmadı."
+            # Sadece aynı anda bir scraping başlat (pid dosyası ile kontrol)
+            pid_path = session_dir / "collaborators_scraping.pid"
+            if not pid_path.exists():
+                try:
+                    collab_process = subprocess.Popen(
+                        collab_args,
+                        cwd="/var/www/akademik-tinder",
+                        env={**os.environ, "PATH": "/var/www/akademik-tinder/venv/bin:" + os.environ.get("PATH", "")},
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
                     )
-                
-                # Read final collaborators
-                final_collaborators = []
-                if collab_path.exists():
-                    try:
-                        with open(collab_path, 'r', encoding='utf-8') as f:
-                            final_collaborators = json.load(f)
-                    except Exception as e:
-                        print(f"⚠️ Error reading final collaborators: {e}")
-                        final_collaborators = []
-                
-                print(f"✅ Returning {len(final_collaborators)} collaborators")
-                
-                return {
-                    "success": True,
-                    "sessionId": session_id,
-                    "message": f"Collaborator scraping tamamlandı! {len(final_collaborators)} işbirlikçi bulundu.",
-                    "profile": selected_profile,
-                    "collaborators": final_collaborators,
-                    "total_collaborators": len(final_collaborators),
-                    "completed": True,
-                    "scraping_started": True
-                }
-                
-            except Exception as e:
-                print(f"⚠️ Failed to start collaborator scraping: {e}")
-                raise HTTPException(status_code=500, detail=f"Collaborator scraping başlatılamadı: {e}")
-                
+                    with open(pid_path, "w") as pidf:
+                        pidf.write(str(collab_process.pid))
+                except Exception as e:
+                    print(f"⚠️ Failed to start collaborator scraping: {e}")
+            # Hemen mevcut collaborators.json'u oku
+            collaborators = []
+            if collab_path.exists():
+                try:
+                    with open(collab_path, 'r', encoding='utf-8') as f:
+                        collaborators = json.load(f)
+                except Exception as e:
+                    print(f"⚠️ Error reading collaborators: {e}")
+            completed = done_path.exists()
+            return {
+                "success": True,
+                "sessionId": session_id,
+                "profile": selected_profile,
+                "collaborators": collaborators,
+                "total_collaborators": len(collaborators),
+                "completed": completed,
+                "scraping_started": True
+            }
         except Exception as e:
             print(f"⚠️ Error processing profile selection: {e}")
             raise HTTPException(status_code=500, detail=f"Profil seçimi işlenirken hata: {e}")
