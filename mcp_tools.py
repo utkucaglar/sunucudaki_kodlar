@@ -1,8 +1,10 @@
+from fastapi import FastAPI, Request
 import httpx
 from typing import Optional, List, Dict, Any
 
-# MCP tool: Profil arama
-async def search_researcher(
+app = FastAPI()
+
+async def _search_researcher(
     name: str,
     email: Optional[str] = None,
     field_id: Optional[int] = None,
@@ -20,8 +22,7 @@ async def search_researcher(
         resp.raise_for_status()
         return resp.json()
 
-# MCP tool: İşbirlikçi polling
-async def get_collaborators(
+async def _get_collaborators(
     session_id: str,
     profile_id: int
 ) -> Dict[str, Any]:
@@ -29,4 +30,24 @@ async def get_collaborators(
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"http://91.99.144.40:3002/api/collaborators/{session_id}", json=payload)
         resp.raise_for_status()
-        return resp.json() 
+        return resp.json()
+
+@app.post("/search_researcher")
+async def search_researcher_api(request: Request):
+    data = await request.json()
+    result = await _search_researcher(
+        name=data.get("name"),
+        email=data.get("email"),
+        field_id=data.get("field_id"),
+        specialty_ids=data.get("specialty_ids")
+    )
+    return result
+
+@app.post("/get_collaborators")
+async def get_collaborators_api(request: Request):
+    data = await request.json()
+    result = await _get_collaborators(
+        session_id=data.get("session_id"),
+        profile_id=data.get("profile_id")
+    )
+    return result 
