@@ -325,9 +325,9 @@ async def api_collaborators(session_id: str, request: dict = None):
     }
 
 @app.get("/api/collaborators/{session_id}")
-async def get_collaborators_progress(session_id: str):
-    """Get current progress of collaborator scraping"""
-    print(f"📊 Getting collaborator progress for session: {session_id}")
+async def get_collaborators_progress(session_id: str, wait: bool = True):
+    """Get collaborators for a session - waits for completion if wait=True"""
+    print(f"📊 Getting collaborators for session: {session_id} (wait={wait})")
     
     session_dir = Path("/var/www/akademik-tinder/public/collaborator-sessions") / session_id
     collab_path = session_dir / "collaborators.json"
@@ -337,36 +337,66 @@ async def get_collaborators_progress(session_id: str):
     if not session_dir.exists():
         raise HTTPException(status_code=404, detail="Session bulunamadı")
     
-    collaborators = []
-    completed = False
+    # If wait=True, wait for completion
+    if wait:
+        print(f"⏳ Waiting for collaborators_done.txt to be created...")
+        wait_time = 0
+        max_wait = 300  # 5 dakika maximum wait
+        check_interval = 2  # 2 saniye aralıklarla kontrol
+        
+        while wait_time < max_wait:
+            if done_path.exists():
+                print(f"✅ collaborators_done.txt found after {wait_time} seconds")
+                break
+            
+            await asyncio.sleep(check_interval)
+            wait_time += check_interval
+            
+            if wait_time % 10 == 0:  # Her 10 saniyede log
+                print(f"⏳ Still waiting... {wait_time}s elapsed")
+        
+        if not done_path.exists():
+            print(f"⚠️ Timeout: collaborators_done.txt not found after {max_wait} seconds")
+            raise HTTPException(
+                status_code=408, 
+                detail=f"Collaborator scraping zaman aşımı. {max_wait} saniye sonra tamamlanmadı."
+            )
     
-    # Read current collaborators if file exists
+    # Check if scraping is completed
+    completed = done_path.exists()
+    
+    if not completed and not wait:
+        # Non-blocking mode, return current status
+        return {
+            "success": True,
+            "sessionId": session_id,
+            "collaborators": [],
+            "total_collaborators": 0,
+            "completed": False,
+            "status": "🔄 Scraping devam ediyor...",
+            "message": "Scraping henüz tamamlanmadı. wait=true ile çağırın veya daha sonra tekrar deneyin.",
+            "timestamp": int(time.time())
+        }
+    
+    # Read final collaborators
+    collaborators = []
     if collab_path.exists():
         try:
             with open(collab_path, 'r', encoding='utf-8') as f:
                 collaborators = json.load(f)
         except Exception as e:
-            print(f"⚠️ Error reading collaborators file: {e}")
-            collaborators = []
+            print(f"⚠️ Error reading final collaborators file: {e}")
+            raise HTTPException(status_code=500, detail="Collaborators dosyası okunamadı")
     
-    # Check if scraping is completed
-    completed = done_path.exists()
-    
-    # Determine status message
-    if completed:
-        status_message = f"✅ Scraping tamamlandı! {len(collaborators)} işbirlikçi bulundu."
-    elif len(collaborators) > 0:
-        status_message = f"🔄 Scraping devam ediyor... {len(collaborators)} işbirlikçi bulundu."
-    else:
-        status_message = "⏳ Scraping başlatılıyor..."
+    print(f"✅ Returning {len(collaborators)} final collaborators")
     
     return {
         "success": True,
         "sessionId": session_id,
         "collaborators": collaborators,
         "total_collaborators": len(collaborators),
-        "completed": completed,
-        "status": status_message,
+        "completed": True,
+        "status": f"✅ Scraping tamamlandı! {len(collaborators)} işbirlikçi bulundu.",
         "timestamp": int(time.time())
     }
 
