@@ -295,14 +295,50 @@ async def api_collaborators(session_id: str, request: dict = None):
                 )
                 print(f"✅ Started collaborator scraping with PID: {collab_process.pid}")
                 
+                # Scraping başlatıldı, şimdi tamamlanmasını bekle
+                print(f"⏳ Waiting for collaborator scraping to complete...")
+                wait_time = 0
+                max_wait = 300  # 5 dakika maximum wait
+                check_interval = 2  # 2 saniye aralıklarla kontrol
+                
+                while wait_time < max_wait:
+                    if (session_dir / "collaborators_done.txt").exists():
+                        print(f"✅ Collaborator scraping completed after {wait_time} seconds")
+                        break
+                    
+                    await asyncio.sleep(check_interval)
+                    wait_time += check_interval
+                    
+                    if wait_time % 10 == 0:  # Her 10 saniyede log
+                        print(f"⏳ Still waiting for collaborators... {wait_time}s elapsed")
+                
+                if not (session_dir / "collaborators_done.txt").exists():
+                    print(f"⚠️ Collaborator scraping timeout after {max_wait} seconds")
+                    raise HTTPException(
+                        status_code=408, 
+                        detail=f"Collaborator scraping zaman aşımı. {max_wait} saniye sonra tamamlanmadı."
+                    )
+                
+                # Read final collaborators
+                final_collaborators = []
+                if collab_path.exists():
+                    try:
+                        with open(collab_path, 'r', encoding='utf-8') as f:
+                            final_collaborators = json.load(f)
+                    except Exception as e:
+                        print(f"⚠️ Error reading final collaborators: {e}")
+                        final_collaborators = []
+                
+                print(f"✅ Returning {len(final_collaborators)} collaborators")
+                
                 return {
                     "success": True,
                     "sessionId": session_id,
-                    "message": "Collaborator scraping başlatıldı",
+                    "message": f"Collaborator scraping tamamlandı! {len(final_collaborators)} işbirlikçi bulundu.",
                     "profile": selected_profile,
-                    "collaborators": [],
-                    "total_collaborators": 0,
-                    "completed": False,
+                    "collaborators": final_collaborators,
+                    "total_collaborators": len(final_collaborators),
+                    "completed": True,
                     "scraping_started": True
                 }
                 
