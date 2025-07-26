@@ -17,6 +17,9 @@ import asyncio
 app = FastAPI()
 
 def scrape_main_profile(name: str, email: Optional[str] = None, field_id: Optional[str] = None, specialty_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    if not name:
+        return {"error": "Name parameter is required"}
+    
     BASE = "https://akademik.yok.gov.tr/"
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
