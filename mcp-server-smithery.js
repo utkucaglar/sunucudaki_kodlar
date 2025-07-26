@@ -1,3 +1,4 @@
+import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -7,225 +8,101 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 
-export default function({ sessionId, config }) {
-  const server = new Server(
-    {
-      name: 'yok-akademik-server',
-      version: '1.0.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
+const app = express();
+app.use(express.json());
 
-  const apiBaseUrl = 'http://91.99.144.40:3002';
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy' });
+});
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'YÖK Akademik MCP Server', 
+    status: 'running' 
+  });
+});
+
+// Tools list endpoint
+app.get('/tools', (req, res) => {
+  res.json({
     tools: [
       {
-        name: 'akademisyen_ara',
-        description: 'YÖK akademik sisteminde akademisyen arar. İsim zorunlu, email, alan ve uzmanlık opsiyonel.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'Akademisyenin adı soyadı (zorunlu)',
-            },
-            email: {
-              type: 'string',
-              description: 'Email adresi (opsiyonel)',
-            },
-            fieldId: {
-              type: 'number',
-              description: 'Alan ID (opsiyonel)',
-            },
-            specialtyIds: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Uzmanlık ID\'leri veya ["all"] (opsiyonel)',
-            },
-          },
-          required: ['name'],
-        },
+        name: 'search_researcher',
+        description: 'Search for researchers in YÖK Akademik',
+        endpoint: '/search_researcher'
       },
       {
-        name: 'isbirlikci_bul',
-        description: 'Seçilen akademisyen profiline göre işbirlikçilerini bulur.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            sessionId: {
-              type: 'string',
-              description: 'Arama session ID (akademisyen_ara çağrısından dönen)',
-            },
-            profileId: {
-              type: 'number',
-              description: 'Seçilen profilin ID\'si',
-            },
-          },
-          required: ['sessionId', 'profileId'],
-        },
-      },
-    ],
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-
-    try {
-      if (name === 'akademisyen_ara') {
-        return await akademisyenAra(args, apiBaseUrl);
-      } else if (name === 'isbirlikci_bul') {
-        return await isbirlikciBul(args, apiBaseUrl);
-      } else {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Bilinmeyen tool: ${name}`
-        );
+        name: 'get_collaborators', 
+        description: 'Get collaborators for a researcher',
+        endpoint: '/get_collaborators'
       }
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Tool çalıştırılırken hata: ${error.message}`
-      );
-    }
+    ]
   });
+});
 
-  return server;
-}
-
-async function akademisyenAra(args, apiBaseUrl) {
-  const { name, email, fieldId, specialtyIds } = args;
-
-  if (!name || !name.trim()) {
-    throw new McpError(ErrorCode.InvalidParams, 'İsim gereklidir');
-  }
-
-  const apiUrl = `${apiBaseUrl}/api/search`;
-  const requestBody = { name: name.trim() };
-
-  if (email && email.trim()) {
-    requestBody.email = email.trim();
-  }
-  if (fieldId) {
-    requestBody.fieldId = fieldId;
-  }
-  if (specialtyIds && Array.isArray(specialtyIds)) {
-    requestBody.specialtyIds = specialtyIds;
-  }
-
+// Search researcher endpoint
+app.post('/search_researcher', async (req, res) => {
   try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'API hatası' }));
-      throw new Error(errorData.error || `HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
+    const { name, email, field_id, specialty_ids } = req.body;
     
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `✅ **Akademisyen Arama Sonucu**\n\n` +
-               `🔍 **Aranan:** ${name}\n` +
-               `📊 **Bulunan Profil:** ${data.profiles?.length || 0}\n` +
-               `🆔 **Session ID:** ${data.sessionId}\n\n` +
-               `📝 **Profil Detayları:**\n` +
-               (data.profiles || []).map((profile, idx) => 
-                 `${idx + 1}. **${profile.name}**\n` +
-                 `   🏛️ Kurum: ${profile.institution || 'Belirtilmemiş'}\n` +
-                 `   📧 Email: ${profile.email || 'Belirtilmemiş'}\n` +
-                 `   🆔 ID: ${profile.id}\n`
-               ).join('\n') +
-               `\n💡 **İşbirlikçiler için:** \`isbirlikci_bul\` tool'unu sessionId ve profileId ile çağırın.`,
-        },
-      ],
-      _metadata: {
-        sessionId: data.sessionId,
-        totalProfiles: data.profiles?.length || 0,
-        profiles: data.profiles,
-        apiResponse: data
-      }
-    };
-
-  } catch (error) {
-    throw new McpError(
-      ErrorCode.InternalError,
-      `API çağrısı başarısız: ${error.message}`
-    );
-  }
-}
-
-async function isbirlikciBul(args, apiBaseUrl) {
-  const { sessionId, profileId } = args;
-
-  if (!sessionId || !profileId) {
-    throw new McpError(ErrorCode.InvalidParams, 'sessionId ve profileId gereklidir');
-  }
-
-  const apiUrl = `${apiBaseUrl}/api/collaborators/${sessionId}`;
-  const requestBody = { profileId: Number(profileId) };
-
-  try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'API hatası' }));
-      throw new Error(errorData.error || `HTTP ${response.status}`);
+    if (!name) {
+      return res.status(400).json({ error: 'Name parameter is required' });
     }
 
-    const data = await response.json();
-
-    return {
-      content: [
+    // Mock response for now
+    res.json({
+      results: [
         {
-          type: 'text',
-          text: `🤝 **İşbirlikçiler Bulundu**\n\n` +
-               `📝 **Seçilen Profil:** ${data.profile?.name || 'Bilinmiyor'}\n` +
-               `🏛️ **Kurum:** ${data.profile?.institution || 'Belirtilmemiş'}\n` +
-               `📊 **Toplam İşbirlikçi:** ${data.collaborators?.length || 0}\n\n` +
-               `🤝 **İşbirlikçiler:**\n` +
-               (data.collaborators || []).slice(0, 15).map((collab, idx) => 
-                 `${idx + 1}. **${collab.name}**\n` +
-                 `   🏛️ ${collab.institution || 'Kurum belirtilmemiş'}\n` +
-                 `   📧 ${collab.email || 'Email belirtilmemiş'}\n`
-               ).join('\n') +
-               (data.collaborators?.length > 15 ? `\n... ve ${data.collaborators.length - 15} tane daha` : '') +
-               `\n\n✅ **Tamamlandı!**`,
-        },
-      ],
-      _metadata: {
-        sessionId: sessionId,
-        profile: data.profile,
-        totalCollaborators: data.collaborators?.length || 0,
-        collaborators: data.collaborators
-      }
-    };
-
+          name: name,
+          title: 'Test Professor',
+          url: 'https://example.com',
+          info: 'Test information',
+          photoUrl: '/default_photo.jpg',
+          header: 'Test Header',
+          email: 'test@example.com'
+        }
+      ]
+    });
   } catch (error) {
-    throw new McpError(
-      ErrorCode.InternalError,
-      `İşbirlikçi bulma API çağrısı başarısız: ${error.message}`
-    );
+    res.status(500).json({ error: error.message });
   }
-}
+});
+
+// Get collaborators endpoint
+app.post('/get_collaborators', async (req, res) => {
+  try {
+    const { name } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Name parameter is required' });
+    }
+
+    // Mock response for now
+    res.json({
+      collaborators: [
+        {
+          id: 1,
+          name: 'Collaborator 1',
+          url: 'https://example.com/collab1'
+        },
+        {
+          id: 2,
+          name: 'Collaborator 2',
+          url: 'https://example.com/collab2'
+        }
+      ]
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 8000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`MCP Server running on port ${PORT}`);
+});
+
+export default app;
