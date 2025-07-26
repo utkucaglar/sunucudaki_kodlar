@@ -1,3 +1,5 @@
 httpx
 fastapi
-uvicorn 
+uvicorn
+selenium
+webdriver-manager 
