@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y wget gnupg2 && \
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - && \
@@ -11,15 +11,15 @@ RUN apt-get update && \
     apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Python dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code
+# Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8001
+# Expose default port
+EXPOSE 8000
 
-# Start command
-CMD ["uvicorn", "mcp_tools:app", "--host", "0.0.0.0", "--port", "8001"] 
+# Start the application
+CMD ["python", "mcp_tools.py"] 
