@@ -18,40 +18,52 @@ async def _search_researcher(
         "specialty_ids": specialty_ids
     }
     payload = {k: v for k, v in payload.items() if v is not None}
-    async with httpx.AsyncClient() as client:
-        resp = await client.post("http://91.99.144.40:3002/api/search", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post("http://localhost:3002/api/search", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        return {"error": f"API call failed: {str(e)}"}
 
 async def _get_collaborators(
     session_id: str,
     profile_id: int
 ) -> Dict[str, Any]:
     payload = {"profileId": profile_id}
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(f"http://91.99.144.40:3002/api/collaborators/{session_id}", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"http://localhost:3002/api/collaborators/{session_id}", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        return {"error": f"API call failed: {str(e)}"}
 
 @app.post("/search_researcher")
 async def search_researcher_api(request: Request):
-    data = await request.json()
-    result = await _search_researcher(
-        name=data.get("name"),
-        email=data.get("email"),
-        field_id=data.get("field_id"),
-        specialty_ids=data.get("specialty_ids")
-    )
-    return result
+    try:
+        data = await request.json()
+        result = await _search_researcher(
+            name=data.get("name"),
+            email=data.get("email"),
+            field_id=data.get("field_id"),
+            specialty_ids=data.get("specialty_ids")
+        )
+        return result
+    except Exception as e:
+        return {"error": f"Request processing failed: {str(e)}"}
 
 @app.post("/get_collaborators")
 async def get_collaborators_api(request: Request):
-    data = await request.json()
-    result = await _get_collaborators(
-        session_id=data.get("session_id"),
-        profile_id=data.get("profile_id")
-    )
-    return result
+    try:
+        data = await request.json()
+        result = await _get_collaborators(
+            session_id=data.get("session_id"),
+            profile_id=data.get("profile_id")
+        )
+        return result
+    except Exception as e:
+        return {"error": f"Request processing failed: {str(e)}"}
 
 @app.get("/health")
 async def health_check():
