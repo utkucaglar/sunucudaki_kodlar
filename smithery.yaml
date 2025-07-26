@@ -2,6 +2,7 @@ name: yok-akademik-mcp
 version: 0.1.0
 description: YÖK Akademik scraping MCP
 entrypoint: mcp_tools.py
+runtime: python
 tools:
   - search_researcher
   - get_collaborators 
