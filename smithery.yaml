@@ -3,8 +3,4 @@ version: 0.1.0
 description: YÖK Akademik scraping MCP
 entrypoint: mcp_tools.py
 runtime: python
-port: 8001
-health_check: /health
-tools:
-  - search_researcher
-  - get_collaborators 
+port: 8001 

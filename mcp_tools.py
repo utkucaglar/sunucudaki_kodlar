@@ -14,7 +14,32 @@ from webdriver_manager.chrome import ChromeDriverManager
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 
-app = FastAPI()
+app = FastAPI(title="YÖK Akademik MCP", version="0.1.0")
+
+@app.get("/")
+async def root():
+    return {"message": "YÖK Akademik MCP Server", "status": "running"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+@app.get("/tools")
+async def list_tools():
+    return {
+        "tools": [
+            {
+                "name": "search_researcher",
+                "description": "Search for researchers in YÖK Akademik",
+                "endpoint": "/search_researcher"
+            },
+            {
+                "name": "get_collaborators", 
+                "description": "Get collaborators for a researcher",
+                "endpoint": "/get_collaborators"
+            }
+        ]
+    }
 
 def scrape_main_profile(name: str, email: Optional[str] = None, field_id: Optional[str] = None, specialty_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     if not name:
@@ -153,10 +178,6 @@ async def get_collaborators_api(request: Request):
     with ThreadPoolExecutor() as pool:
         result = await loop.run_in_executor(pool, scrape_collaborators, data.get("name"))
     return result
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001) 
